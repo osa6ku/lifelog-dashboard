@@ -911,8 +911,14 @@ function syncDiaryDocAction(payload) {
       const docBody = doc.getBody();
       const hText = `${payload.date} (${payload.weekday || ''}) — ${payload.title || '(無題)'}`;
       docBody.appendParagraph(hText).setHeading(DocumentApp.ParagraphHeading.HEADING2);
-      if (payload.location) docBody.appendParagraph(`📍 場所: ${String(payload.location).split('\n').join(' → ')}`);
-      if (payload.body) docBody.appendParagraph(String(payload.body));
+      const locStr = String(payload.location || '').split('\n').map(s => s.trim()).filter(Boolean).join(' → ');
+      if (locStr) docBody.appendParagraph(`📍 場所: ${locStr}`);
+      const bodyText = String(payload.body || '').trim();
+      if (bodyText) {
+        bodyText.split(/\r?\n/).forEach(line => {
+          if (line.trim()) docBody.appendParagraph(line);
+        });
+      }
       const jpgNames = payload.jpgNames || [];
       (payload.driveUrls || []).forEach((u, idx) => {
         docBody.appendParagraph(`📷 写真: ${jpgNames[idx] || 'photo.jpg'}`).setLinkUrl(u);
@@ -942,14 +948,14 @@ function deleteDiaryEntry(payload) {
 }
 
 function syncDiaryDocUpdate_(oldDate, oldTitle, newDate, newWeekday, newTitle, newLocation, newBody) {
-  const year = newDate.slice(0, 4);
+  const year = String(newDate || '').slice(0, 4);
   const docId = YEAR_DOC_IDS[year];
-  if (!docId || oldDate.slice(0, 4) !== year) return false;
+  if (!docId || String(oldDate || '').slice(0, 4) !== year) return false;
 
   const doc = DocumentApp.openById(docId);
   const docBody = doc.getBody();
-  const numChildren = docBody.getNumChildren();
-  const titlePrefix = oldTitle ? `${oldDate}` : `${oldDate}`;
+  let numChildren = docBody.getNumChildren();
+  const titlePrefix = `${oldDate}`;
   let headingIdx = -1;
 
   for (let i = 0; i < numChildren; i++) {
@@ -968,50 +974,54 @@ function syncDiaryDocUpdate_(oldDate, oldTitle, newDate, newWeekday, newTitle, n
   const newHeading = `${newDate} (${newWeekday}) — ${newTitle || '(無題)'}`;
   docBody.getChild(headingIdx).asParagraph().setText(newHeading);
 
-  // 見出しの次〜HorizontalRule（または次のHEADING2）までの位置・本文を更新（写真リンク段落は保持）
-  const photoInsertIdx = [];
+  // 見出しの次〜HorizontalRule（または次のHEADING2）までの古い場所・本文段落を収集（写真リンク段落は保持）
   const removeIndices = [];
-  let endIdx = numChildren;
+  let hasTerminator = false;
   for (let i = headingIdx + 1; i < numChildren; i++) {
     const el = docBody.getChild(i);
     const t = el.getType();
     if (t === DocumentApp.ElementType.HORIZONTAL_RULE) {
-      endIdx = i;
+      hasTerminator = true;
       break;
     }
     if (t === DocumentApp.ElementType.PARAGRAPH) {
       const p = el.asParagraph();
       if (p.getHeading() === DocumentApp.ParagraphHeading.HEADING2) {
-        endIdx = i;
+        hasTerminator = true;
         break;
       }
-      if (p.getText().startsWith('📷')) {
-        photoInsertIdx.push(i);
-      } else {
+      if (!p.getText().startsWith('📷')) {
         removeIndices.push(i);
       }
     }
   }
 
-  // 先に新しい段落を挿入してから古い段落を削除する（「最終段落は削除できません」エラー回避）
-  let insertAt = headingIdx + 1;
-  if (newLocation) {
-    docBody.insertParagraph(insertAt, `📍 場所: ${newLocation.split('\n').join(' → ')}`);
-    insertAt++;
+  // 末尾エントリで終端がない場合、先にHorizontalRuleを追加することで「最終段落は削除できません」を根本回避
+  if (!hasTerminator) {
+    docBody.appendHorizontalRule();
+    numChildren = docBody.getNumChildren();
   }
-  if (newBody) {
-    docBody.insertParagraph(insertAt, newBody);
-    insertAt++;
-  }
-  const insertedCount = insertAt - (headingIdx + 1);
+
+  // 1. 先に古い段落をすべて削除（多重挿入・重複蓄積を防止）
   for (let i = removeIndices.length - 1; i >= 0; i--) {
-    const child = docBody.getChild(removeIndices[i] + insertedCount);
-    try {
-      docBody.removeChild(child);
-    } catch (e) {
-      if (child.getType() === DocumentApp.ElementType.PARAGRAPH) child.asParagraph().setText('');
-    }
+    const idx = removeIndices[i];
+    if (idx >= docBody.getNumChildren() - 1) continue;
+    docBody.removeChild(docBody.getChild(idx));
   }
+
+  // 2. その後で新しい場所・本文を非空行のみ安全に挿入（「Cannot insert an empty text element.」を完全回避）
+  let insertAt = headingIdx + 1;
+  const locStr = String(newLocation || '').split('\n').map(s => s.trim()).filter(Boolean).join(' → ');
+  if (locStr) {
+    docBody.insertParagraph(insertAt, `📍 場所: ${locStr}`);
+    insertAt++;
+  }
+  const bodyLines = String(newBody || '').split(/\r?\n/).filter(line => line.trim().length > 0);
+  bodyLines.forEach(line => {
+    docBody.insertParagraph(insertAt, line);
+    insertAt++;
+  });
+
   doc.saveAndClose();
   return true;
 }

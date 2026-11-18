@@ -9,7 +9,7 @@
   <link rel="manifest" href="./manifest.json">
   <link rel="apple-touch-icon" href="./apple-touch-icon.png">
   <link rel="icon" type="image/png" href="./icon-192.png">
-  <title>ライフログ・ダッシュボード v1.13.0</title>
+  <title>ライフログ・ダッシュボード v1.13.1</title>
   <style>
     :root {
       --bg: #f4f6f9;
@@ -260,7 +260,7 @@
   <div class="header-top">
     <h1 class="app-title">📚 ライフログ・ダッシュボード</h1>
     <div class="header-right">
-      <span class="ver-badge" id="app-version">v1.13.0</span>
+      <span class="ver-badge" id="app-version">v1.13.1</span>
       <button class="btn-sm" id="btn-check-update" onclick="manualCheckUpdate()" title="最新バージョン確認・更新">🔄 更新</button>
     </div>
   </div>
@@ -491,7 +491,7 @@
 </div>
 
 <script>
-const APP_VERSION = 'v1.13.0';
+const APP_VERSION = 'v1.13.1';
 const GAS_API_URL = 'https://script.google.com/macros/s/AKfycbxLecFd_9FWeR-2w2ThU5SYS7es-0IVKODoLWYgDJGfsoiQzsSRF9IFMAhtZTPl17CDKw/exec';
 
 let watchData = [];
@@ -2050,8 +2050,26 @@ async function submitDiary() {
         if (document.getElementById('view-nutrition').style.display !== 'none') renderNutritionView();
       }
       if (res.needsDocSync && res.docSyncPayload) {
-        // Googleドキュメント同期はバックグラウンドで非同期実行（UIをブロックしない）
-        apiPost('syncDiaryDoc', res.docSyncPayload).catch(() => {});
+        // Googleドキュメント同期はバックグラウンドで非同期実行（失敗時は再試行トースト通知）
+        const runAsyncDocSync = (syncPayload) => {
+          apiPost('syncDiaryDoc', syncPayload)
+            .then(syncRes => {
+              if (!syncRes || !syncRes.ok) {
+                const errMsg = (syncRes && syncRes.error) || '同期エラー';
+                showToast(`⚠️ 本文のドキュメント同期に失敗しました (${errMsg})`, 'error', () => {
+                  showToast('ドキュメントを再同期中...', 'info', null, 0);
+                  runAsyncDocSync(syncPayload);
+                }, 0);
+              }
+            })
+            .catch(err => {
+              showToast(`⚠️ 本文のドキュメント同期に失敗しました (${err.message || err})`, 'error', () => {
+                showToast('ドキュメントを再同期中...', 'info', null, 0);
+                runAsyncDocSync(syncPayload);
+              }, 0);
+            });
+        };
+        runAsyncDocSync(res.docSyncPayload);
       }
       showToast('保存しました', 'success', null, 2000);
     } catch (err) {
