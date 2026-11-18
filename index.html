@@ -9,7 +9,7 @@
   <link rel="manifest" href="./manifest.json">
   <link rel="apple-touch-icon" href="./apple-touch-icon.png">
   <link rel="icon" type="image/png" href="./icon-192.png">
-  <title>ライフログ・ダッシュボード v1.4.1</title>
+  <title>ライフログ・ダッシュボード v1.5.0</title>
   <style>
     :root {
       --bg: #f4f6f9;
@@ -216,6 +216,27 @@
       border-radius: 10px; padding: 10px; font-size: 13px; font-weight: 700; cursor: pointer; width: 100%; margin-top: 8px;
     }
     details summary { cursor: pointer; font-size: 13px; font-weight: 700; color: var(--primary); margin-bottom: 8px; }
+    .meal-day-head {
+      display: flex; justify-content: space-between; align-items: center;
+      font-weight: 700; font-size: 14px; padding-bottom: 6px; border-bottom: 1px solid var(--border); margin-bottom: 8px;
+    }
+    .meal-set-row {
+      display: flex; gap: 10px; align-items: flex-start; padding: 8px 0;
+      border-bottom: 1px dashed #e5e7eb;
+    }
+    .meal-set-row:last-child { border-bottom: none; padding-bottom: 0; }
+    .meal-set-thumb {
+      width: 64px; height: 64px; object-fit: cover; border-radius: 8px;
+      border: 1px solid var(--border); flex: 0 0 auto; background: #e5e7eb; cursor: pointer;
+    }
+    .meal-type-pill {
+      display: inline-block; font-size: 11px; font-weight: 700; padding: 2px 7px;
+      border-radius: 999px; margin-right: 4px;
+    }
+    .mt-朝 { background: #fef3c7; color: #b45309; }
+    .mt-昼 { background: #dcfce7; color: #15803d; }
+    .mt-夕 { background: #dbeafe; color: #1d4ed8; }
+    .mt-間 { background: #f3e8ff; color: #7e22ce; }
   </style>
 </head>
 <body>
@@ -223,7 +244,7 @@
   <div class="header-top">
     <h1 class="app-title">📚 ライフログ・ダッシュボード</h1>
     <div class="header-right">
-      <span class="ver-badge" id="app-version">v1.4.1</span>
+      <span class="ver-badge" id="app-version">v1.5.0</span>
       <button class="btn-sm" id="btn-check-update" onclick="manualCheckUpdate()" title="最新バージョン確認・更新">🔄 更新</button>
     </div>
   </div>
@@ -286,13 +307,20 @@
   <section id="view-nutrition" style="display:none;">
     <div class="card">
       <div class="card-head">
-        <div class="card-title">🍽️ 直近7日間のカロリー・栄養サマリー</div>
-        <button class="btn-sm" onclick="loadDiaryData(true)">🔄 再読込</button>
+        <div class="card-title">🍽️ カロリー・栄養サマリー</div>
+        <div style="display:flex;gap:6px;">
+          <button class="btn-sm success" onclick="openMealModal()">＋ 食事を記録</button>
+          <button class="btn-sm" onclick="loadMealsData(true)">🔄</button>
+        </div>
       </div>
       <div id="nutrition-summary" style="margin-top:10px;"><div class="loading">集計中...</div></div>
     </div>
     <div class="count-bar" id="nutrition-count">食事ログ読み込み中...</div>
     <div id="nutrition-list"></div>
+    <details id="asuken-history-details" style="margin-top:14px;">
+      <summary id="asuken-history-summary">📊 過去の1日まとめ履歴（〜2026-11-11 あすけん移行分）</summary>
+      <div id="asuken-history-list"></div>
+    </details>
   </section>
 </main>
 
@@ -390,6 +418,47 @@
   </div>
 </div>
 
+<div class="modal-backdrop" id="modal-meal">
+  <div class="modal">
+    <div class="modal-title"><span id="meal-modal-title">🍽️ 食事を記録</span><button class="btn-sm" onclick="closeModals()">✕</button></div>
+    <div class="meal-grid">
+      <div class="field"><label>日付 *</label><input id="m-date" type="date"></div>
+      <div class="field">
+        <label>食事区分 *</label>
+        <select id="m-type">
+          <option value="朝食">🍳 朝食</option>
+          <option value="昼食" selected>☀️ 昼食</option>
+          <option value="夕食">🌙 夕食</option>
+          <option value="間食">🍪 間食</option>
+        </select>
+      </div>
+    </div>
+    <div class="field">
+      <label>料理名 *</label>
+      <div class="loc-row">
+        <input id="m-dish" placeholder="例: 牛肉フォーと生春巻き">
+        <button type="button" class="btn-sm success" id="btn-m-est" onclick="estimateMealModal()">✨ 推定</button>
+      </div>
+    </div>
+    <div class="meal-grid">
+      <div class="field"><label>カロリー (kcal)</label><input id="m-cal" type="number" min="0" placeholder="例: 650"></div>
+      <div class="field"><label>P たんぱく質(g)</label><input id="m-p" type="number" min="0" placeholder="g"></div>
+    </div>
+    <div class="meal-grid">
+      <div class="field"><label>F 脂質(g)</label><input id="m-f" type="number" min="0" placeholder="g"></div>
+      <div class="field"><label>C 炭水化物(g)</label><input id="m-c" type="number" min="0" placeholder="g"></div>
+    </div>
+    <div class="field"><label>所見・メモ</label><input id="m-memo" placeholder="栄養メモや店舗名など"></div>
+    <div class="field">
+      <label>食事写真（任意）</label>
+      <div id="m-existing-photos" class="edit-photo-list"></div>
+      <input id="m-photos" type="file" accept="image/*" multiple>
+    </div>
+    <button class="btn-big btn-diary" style="width:100%;" id="btn-save-meal" onclick="submitMeal()">食事を保存する</button>
+    <button class="btn-danger" id="btn-delete-meal" style="display:none;" onclick="deleteCurrentMeal()">🗑️ この食事記録を削除</button>
+  </div>
+</div>
+
 <div class="modal-backdrop" id="modal-image" onclick="if(event.target===this) closeModals()">
   <div class="modal">
     <div class="modal-title"><span>📷 写真プレビュー</span><button class="btn-sm" onclick="closeModals()">✕</button></div>
@@ -401,15 +470,18 @@
 </div>
 
 <script>
-const APP_VERSION = 'v1.4.1';
+const APP_VERSION = 'v1.5.0';
 const GAS_API_URL = 'https://script.google.com/macros/s/AKfycbxLecFd_9FWeR-2w2ThU5SYS7es-0IVKODoLWYgDJGfsoiQzsSRF9IFMAhtZTPl17CDKw/exec';
 
 let watchData = [];
 let diaryData = [];
+let mealData = [];
 let editingWatch = null;
 let editingDiary = null;
+let editingMeal = null;
 let diaryLocations = [];
 let removedPhotoUrls = new Set();
+let removedMealPhotoUrls = new Set();
 let diaryDisplayLimit = 80;
 let statusFilter = '進行中';
 let catFilter = 'ALL';
@@ -476,12 +548,15 @@ function switchTab(tab) {
   document.getElementById('nav-diary').classList.toggle('active', tab === 'diary');
   document.getElementById('nav-nutrition').classList.toggle('active', tab === 'nutrition');
   if (tab === 'diary') {
+    if (mealData.length === 0) loadMealsData(false);
     if (diaryData.length === 0) loadDiaryData();
     else renderDiary();
   }
   if (tab === 'nutrition') {
-    if (diaryData.length === 0) loadDiaryData().then(() => renderNutritionView());
-    else renderNutritionView();
+    Promise.all([
+      mealData.length === 0 ? loadMealsData(false) : Promise.resolve(),
+      diaryData.length === 0 ? loadDiaryData(false) : Promise.resolve(),
+    ]).then(() => renderNutritionView());
   }
 }
 
@@ -523,6 +598,15 @@ async function loadDiaryData(forceRenderNut) {
   renderDiary();
   if (forceRenderNut || document.getElementById('view-nutrition').style.display !== 'none') {
     renderNutritionView();
+  }
+}
+
+async function loadMealsData(shouldRender = true) {
+  const data = await apiGet({ api: 'meals' });
+  mealData = data.entries || [];
+  if (shouldRender) {
+    renderNutritionView();
+    if (diaryData.length > 0) renderDiary();
   }
 }
 
@@ -651,6 +735,8 @@ function parseLocations(locStr) {
   return String(locStr || '').split(/\r?\n/).map(s => s.trim()).filter(Boolean);
 }
 
+const MEAL_ORDER = { '朝食': 1, '昼食': 2, '夕食': 3, '間食': 4 };
+
 function buildDiaryCardHtml(d) {
   const placeholder = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
   const ids = d.imageIds || [];
@@ -659,28 +745,39 @@ function buildDiaryCardHtml(d) {
   const locHtml = locs.length > 0
     ? `<div class="meta-row">${locs.map(l => `<a class="loc-badge" target="_blank" rel="noopener" href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(l)}">📍 ${esc(l)}</a>`).join('')}</div>`
     : '';
-  const hasMeal = d.calories !== '' && d.calories !== undefined && d.calories !== null;
-  const pfcParts = [
-    d.protein !== '' && d.protein !== undefined ? `P:${d.protein}g` : '',
-    d.fat !== '' && d.fat !== undefined ? `F:${d.fat}g` : '',
-    d.carbs !== '' && d.carbs !== undefined ? `C:${d.carbs}g` : '',
-  ].filter(Boolean).join(' ');
-  const mealHtml = (d.mealType || hasMeal || d.nutritionAdvice)
-    ? `<div class="meal-badge">🍽️ ${esc(d.mealType || '食事')}${hasMeal ? ` ・ ${esc(d.calories)} kcal` : ''}${pfcParts ? `（${esc(pfcParts)}）` : ''}</div>${d.nutritionAdvice ? `<div class="card-cast">💡 ${esc(d.nutritionAdvice)}</div>` : ''}`
-    : '';
   const mediaHtml = ids.length > 0
     ? `<div class="thumb-strip">${ids.map((fid, i) => `<img class="thumb-img" data-file-id="${esc(fid)}" src="${placeholder}" alt="写真${i + 1}" onclick="openImagePreview('${esc(fid)}','${esc(urls[i] || '')}')">`).join('')}</div>`
     : (urls.length > 0 ? `<div class="meta-row" style="margin-top:8px;">${urls.map((u, i) => `<a class="q-link" target="_blank" href="${esc(u)}">📷 写真${i + 1}</a>`).join('')}</div>` : '');
+
+  const dayMeals = mealData.filter(m => m.date === d.date).sort((a, b) => (MEAL_ORDER[a.mealType] || 9) - (MEAL_ORDER[b.mealType] || 9));
+  let mealHtml = '';
+  if (dayMeals.length > 0) {
+    const sumK = dayMeals.reduce((s, m) => s + Number(m.calories || 0), 0);
+    const mealPills = dayMeals.map(m => `<span class="meal-badge" style="margin-top:4px;cursor:pointer;" onclick="openEditMealModal(${m.row}, '${esc(m.id)}')">${esc(m.mealType)}: ${esc(m.dishName)}${m.calories ? ` (${esc(m.calories)}kcal)` : ''}</span>`).join(' ');
+    mealHtml = `<div style="margin-top:6px;">${mealPills}${sumK ? ` <span style="font-size:11px;color:var(--muted);">(計${sumK}kcal)</span>` : ''}</div>`;
+  } else {
+    const hasMeal = d.calories !== '' && d.calories !== undefined && d.calories !== null;
+    const pfcParts = [
+      d.protein !== '' && d.protein !== undefined ? `P:${d.protein}g` : '',
+      d.fat !== '' && d.fat !== undefined ? `F:${d.fat}g` : '',
+      d.carbs !== '' && d.carbs !== undefined ? `C:${d.carbs}g` : '',
+    ].filter(Boolean).join(' ');
+    if (d.mealType || hasMeal || d.nutritionAdvice) {
+      mealHtml = `<div class="meal-badge">🍽️ ${esc(d.mealType || '食事')}${hasMeal ? ` ・ ${esc(d.calories)} kcal` : ''}${pfcParts ? `（${esc(pfcParts)}）` : ''}</div>${d.nutritionAdvice ? `<div class="card-cast">💡 ${esc(d.nutritionAdvice)}</div>` : ''}`;
+    }
+  }
+
   return `
     <div class="card" id="dcard-${Number(d.row || 0)}">
       <div class="card-head"><div class="card-title">${esc(d.date)} (${esc(d.weekday)}) ${esc(d.title || '')}</div></div>
       ${locHtml}
-      ${mealHtml}
-      <div class="card-summary" style="white-space:pre-wrap;">${esc(d.body)}</div>
       ${mediaHtml}
+      <div class="card-summary" style="white-space:pre-wrap;">${esc(d.body)}</div>
+      ${mealHtml}
       <div class="card-actions">
         <button class="btn-sm primary" onclick="openEditDiaryModal(${Number(d.row || 0)}, '${esc(d.id)}')">✏️ 編集</button>
         <button class="btn-sm success" onclick="quickAnalyzeMeal(${Number(d.row || 0)}, '${esc(d.id)}')">🍽️ 栄養分析</button>
+        <button class="btn-sm" onclick="openMealModal('${esc(d.date)}')">＋ 食事追加</button>
       </div>
     </div>`;
 }
@@ -715,8 +812,10 @@ function renderNutritionView() {
   const sumEl = document.getElementById('nutrition-summary');
   const listEl = document.getElementById('nutrition-list');
   const countEl = document.getElementById('nutrition-count');
+  const asukenEl = document.getElementById('asuken-history-list');
+  const asukenSumEl = document.getElementById('asuken-history-summary');
 
-  const mealEntries = diaryData.filter(d =>
+  const diarySummaryEntries = diaryData.filter(d =>
     (d.calories !== '' && d.calories !== undefined && d.calories !== null) || d.mealType || d.nutritionAdvice
   );
 
@@ -729,19 +828,31 @@ function renderNutritionView() {
     days.push(iso);
   }
   const dayTotals = {};
-  days.forEach(d => { dayTotals[d] = { kcal: 0, p: 0, f: 0, c: 0, count: 0 }; });
-  let weekKcal = 0, weekP = 0, weekF = 0, weekC = 0, weekDaysWithData = 0;
+  days.forEach(d => { dayTotals[d] = { kcal: 0, p: 0, f: 0, c: 0, count: 0, hasUnit: false }; });
 
-  mealEntries.forEach(d => {
-    if (dayTotals[d.date]) {
-      const k = Number(d.calories || 0);
-      dayTotals[d.date].kcal += k;
+  // 食事単位DB（mealData）を優先集計
+  mealData.forEach(m => {
+    if (dayTotals[m.date]) {
+      dayTotals[m.date].kcal += Number(m.calories || 0);
+      dayTotals[m.date].p += Number(m.protein || 0);
+      dayTotals[m.date].f += Number(m.fat || 0);
+      dayTotals[m.date].c += Number(m.carbs || 0);
+      dayTotals[m.date].count++;
+      dayTotals[m.date].hasUnit = true;
+    }
+  });
+  // 食事単位DBがない日は日記DBの1日まとめで補完
+  diarySummaryEntries.forEach(d => {
+    if (dayTotals[d.date] && !dayTotals[d.date].hasUnit) {
+      dayTotals[d.date].kcal += Number(d.calories || 0);
       dayTotals[d.date].p += Number(d.protein || 0);
       dayTotals[d.date].f += Number(d.fat || 0);
       dayTotals[d.date].c += Number(d.carbs || 0);
       dayTotals[d.date].count++;
     }
   });
+
+  let weekKcal = 0, weekP = 0, weekF = 0, weekC = 0, weekDaysWithData = 0;
   days.forEach(d => {
     const v = dayTotals[d];
     if (v.count > 0) {
@@ -785,14 +896,74 @@ function renderNutritionView() {
       <div style="width:${cPct}%;background:#10b981;" title="炭水化物"></div>
     </div>`;
 
-  countEl.textContent = `食事・栄養記録あり: ${mealEntries.length}件（日記カードの「🍽️ 栄養分析」から追加できます）`;
-  if (mealEntries.length === 0) {
-    listEl.innerHTML = '<div class="loading">まだ食事・栄養記録がありません。日記カードの「🍽️ 栄養分析」または編集画面から記録してください。</div>';
-    return;
+  // 日別・食事区分順（朝食→昼食→夕食→間食）セット描画
+  const grouped = {};
+  mealData.forEach(m => {
+    if (!grouped[m.date]) grouped[m.date] = [];
+    grouped[m.date].push(m);
+  });
+  const sortedDates = Object.keys(grouped).sort((a, b) => b.localeCompare(a));
+  const placeholder = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
+
+  countEl.textContent = `食事単位セット記録: ${mealData.length}食（${sortedDates.length}日分）`;
+  if (sortedDates.length === 0) {
+    listEl.innerHTML = '<div class="loading">食事単位セットはまだ登録されていません。「＋ 食事を記録」またはデータ移行から追加できます。</div>';
+  } else {
+    listEl.innerHTML = sortedDates.map(date => {
+      const items = grouped[date].sort((a, b) => (MEAL_ORDER[a.mealType] || 9) - (MEAL_ORDER[b.mealType] || 9));
+      const dKcal = items.reduce((s, x) => s + Number(x.calories || 0), 0);
+      const dP = Math.round(items.reduce((s, x) => s + Number(x.protein || 0), 0));
+      const dF = Math.round(items.reduce((s, x) => s + Number(x.fat || 0), 0));
+      const dC = Math.round(items.reduce((s, x) => s + Number(x.carbs || 0), 0));
+      const rowsHtml = items.map(m => {
+        const mtClass = m.mealType === '朝食' ? 'mt-朝' : m.mealType === '昼食' ? 'mt-昼' : m.mealType === '夕食' ? 'mt-夕' : 'mt-間';
+        const firstId = (m.photoIds && m.photoIds[0]) || '';
+        const firstUrl = (m.photoUrls && m.photoUrls[0]) || '';
+        const thumbHtml = firstId
+          ? `<img class="meal-set-thumb" data-file-id="${esc(firstId)}" src="${placeholder}" alt="${esc(m.dishName)}" onclick="openImagePreview('${esc(firstId)}','${esc(firstUrl)}')">`
+          : '';
+        return `
+          <div class="meal-set-row">
+            ${thumbHtml}
+            <div style="flex:1;min-width:0;">
+              <div>
+                <span class="meal-type-pill ${mtClass}">${esc(m.mealType)}</span>
+                <strong style="font-size:14px;">${esc(m.dishName)}</strong>
+              </div>
+              <div style="font-size:12px;color:#047857;font-weight:600;margin-top:2px;">
+                ${m.calories !== '' ? `${esc(m.calories)} kcal` : 'カロリー未設定'}
+                ${(m.protein !== '' || m.fat !== '' || m.carbs !== '') ? `（P:${esc(m.protein || 0)}g / F:${esc(m.fat || 0)}g / C:${esc(m.carbs || 0)}g）` : ''}
+              </div>
+              ${m.memo ? `<div style="font-size:12px;color:var(--muted);margin-top:2px;">${esc(m.memo)}</div>` : ''}
+            </div>
+            <button class="btn-sm" onclick="openEditMealModal(${m.row}, '${esc(m.id)}')">✏️</button>
+          </div>`;
+      }).join('');
+      return `
+        <div class="card">
+          <div class="meal-day-head">
+            <span>📅 ${esc(date)}</span>
+            <span style="font-size:12px;color:#047857;">計 ${dKcal} kcal (P:${dP} F:${dF} C:${dC})</span>
+          </div>
+          ${rowsHtml}
+        </div>`;
+    }).join('');
+    ensureThumbObserver();
+    listEl.querySelectorAll('img.meal-set-thumb[data-file-id]').forEach(img => thumbObserver.observe(img));
   }
-  listEl.innerHTML = mealEntries.slice(0, 50).map(buildDiaryCardHtml).join('');
-  ensureThumbObserver();
-  listEl.querySelectorAll('img.thumb-img[data-file-id]').forEach(img => thumbObserver.observe(img));
+
+  // 〜2026-11-11 あすけん1日まとめ履歴（既存データ保持表示）
+  asukenSumEl.textContent = `📊 1日まとめ履歴（〜2026-11-11 あすけん移行分等: ${diarySummaryEntries.length}日分）`;
+  asukenEl.innerHTML = diarySummaryEntries.slice(0, 130).map(d => `
+    <div class="card" style="padding:10px 12px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;font-size:13px;">
+        <strong>${esc(d.date)} (${esc(d.weekday)}) ${esc(d.mealType || '1日まとめ')}</strong>
+        <strong style="color:#047857;">${esc(d.calories)} kcal</strong>
+      </div>
+      <div style="font-size:12px;color:var(--muted);margin-top:2px;">
+        P:${esc(d.protein || 0)}g / F:${esc(d.fat || 0)}g / C:${esc(d.carbs || 0)}g ${d.nutritionAdvice ? `| ${esc(d.nutritionAdvice)}` : ''}
+      </div>
+    </div>`).join('');
 }
 
 async function openImagePreview(fid, driveUrl) {
@@ -982,7 +1153,166 @@ function openEditDiaryModal(row, id) {
 function closeModals() {
   document.getElementById('modal-watch').classList.remove('open');
   document.getElementById('modal-diary').classList.remove('open');
+  document.getElementById('modal-meal').classList.remove('open');
   document.getElementById('modal-image').classList.remove('open');
+}
+
+function renderMealExistingPhotos(entry) {
+  const wrap = document.getElementById('m-existing-photos');
+  const urls = (entry && entry.photoUrls) || [];
+  const ids = (entry && entry.photoIds) || [];
+  if (urls.length === 0) { wrap.innerHTML = ''; return; }
+  wrap.innerHTML = urls.map((u, idx) => {
+    const fid = ids[idx] || '';
+    const isRemoved = removedMealPhotoUrls.has(u);
+    const src = (fid && thumbMemCache[fid]) ? thumbMemCache[fid] : 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
+    return `
+      <div class="edit-photo-item ${isRemoved ? 'removed' : ''}">
+        <img class="thumb-img" style="width:76px;height:76px;" data-file-id="${esc(fid)}" src="${src}" alt="食事写真${idx + 1}">
+        <button type="button" class="edit-photo-del" onclick="toggleRemoveMealPhoto('${esc(u)}')">${isRemoved ? '↺' : '✕'}</button>
+      </div>`;
+  }).join('');
+  ensureThumbObserver();
+  wrap.querySelectorAll('img.thumb-img[data-file-id]').forEach(img => thumbObserver.observe(img));
+}
+
+function toggleRemoveMealPhoto(url) {
+  if (removedMealPhotoUrls.has(url)) removedMealPhotoUrls.delete(url);
+  else removedMealPhotoUrls.add(url);
+  renderMealExistingPhotos(editingMeal);
+}
+
+function openMealModal(presetDate) {
+  editingMeal = null;
+  removedMealPhotoUrls = new Set();
+  document.getElementById('meal-modal-title').textContent = '🍽️ 食事を記録';
+  document.getElementById('btn-save-meal').textContent = '食事を保存する';
+  document.getElementById('btn-delete-meal').style.display = 'none';
+  document.getElementById('m-date').value = presetDate || new Date().toISOString().slice(0, 10);
+  document.getElementById('m-type').value = '昼食';
+  document.getElementById('m-dish').value = '';
+  document.getElementById('m-cal').value = '';
+  document.getElementById('m-p').value = '';
+  document.getElementById('m-f').value = '';
+  document.getElementById('m-c').value = '';
+  document.getElementById('m-memo').value = '';
+  document.getElementById('m-photos').value = '';
+  renderMealExistingPhotos(null);
+  document.getElementById('modal-meal').classList.add('open');
+}
+
+function openEditMealModal(row, id) {
+  const m = mealData.find(x => (row && x.row === row) || String(x.id) === String(id));
+  if (!m) return;
+  editingMeal = m;
+  removedMealPhotoUrls = new Set();
+  document.getElementById('meal-modal-title').textContent = '✏️ 食事記録を編集';
+  document.getElementById('btn-save-meal').textContent = '変更を保存する';
+  document.getElementById('btn-delete-meal').style.display = 'block';
+  document.getElementById('m-date').value = m.date || '';
+  document.getElementById('m-type').value = m.mealType || '昼食';
+  document.getElementById('m-dish').value = m.dishName || '';
+  document.getElementById('m-cal').value = m.calories !== '' && m.calories !== undefined ? m.calories : '';
+  document.getElementById('m-p').value = m.protein !== '' && m.protein !== undefined ? m.protein : '';
+  document.getElementById('m-f').value = m.fat !== '' && m.fat !== undefined ? m.fat : '';
+  document.getElementById('m-c').value = m.carbs !== '' && m.carbs !== undefined ? m.carbs : '';
+  document.getElementById('m-memo').value = m.memo || '';
+  document.getElementById('m-photos').value = '';
+  renderMealExistingPhotos(m);
+  document.getElementById('modal-meal').classList.add('open');
+}
+
+async function estimateMealModal() {
+  const dish = document.getElementById('m-dish').value.trim();
+  if (!dish) { alert('料理名を入力してください'); return; }
+  const btn = document.getElementById('btn-m-est');
+  btn.disabled = true; btn.textContent = '推定中...';
+  try {
+    const res = await apiPost('analyzeMeal', {
+      title: dish,
+      body: `${dish} ${document.getElementById('m-memo').value}`,
+      mealType: document.getElementById('m-type').value,
+      save: false,
+    });
+    if (res && res.ok && res.analysis) {
+      const a = res.analysis;
+      document.getElementById('m-cal').value = a.calories !== undefined ? a.calories : '';
+      document.getElementById('m-p').value = a.protein !== undefined ? a.protein : '';
+      document.getElementById('m-f').value = a.fat !== undefined ? a.fat : '';
+      document.getElementById('m-c').value = a.carbs !== undefined ? a.carbs : '';
+      if (!document.getElementById('m-memo').value.trim() && a.advice) {
+        document.getElementById('m-memo').value = a.advice;
+      }
+    }
+  } catch (err) {
+    alert(`推定エラー: ${err.message || err}`);
+  } finally {
+    btn.disabled = false; btn.textContent = '✨ 推定';
+  }
+}
+
+async function submitMeal() {
+  const dishName = document.getElementById('m-dish').value.trim();
+  if (!dishName) { alert('料理名を入力してください'); return; }
+  const btn = document.getElementById('btn-save-meal');
+  const isEdit = Boolean(editingMeal);
+  const origLabel = isEdit ? '変更を保存する' : '食事を保存する';
+  btn.disabled = true; btn.textContent = '保存中...';
+  try {
+    const files = Array.from(document.getElementById('m-photos').files || []);
+    const photos = [];
+    for (const f of files) {
+      try { photos.push(await resizeImageToJpgBase64(f, 1200, 0.8)); } catch (e) { /* skip */ }
+    }
+    photos.sort((a, b) => (b.ts || 0) - (a.ts || 0));
+
+    const payload = {
+      date: document.getElementById('m-date').value,
+      mealType: document.getElementById('m-type').value,
+      dishName,
+      calories: document.getElementById('m-cal').value,
+      protein: document.getElementById('m-p').value,
+      fat: document.getElementById('m-f').value,
+      carbs: document.getElementById('m-c').value,
+      memo: document.getElementById('m-memo').value,
+      photos,
+    };
+    if (isEdit) {
+      payload.row = editingMeal.row;
+      payload.id = editingMeal.id;
+      payload.removeUrls = Array.from(removedMealPhotoUrls);
+      const res = await apiPost('updateMeal', payload);
+      if (!res || !res.ok) throw new Error((res && res.error) || '更新に失敗しました');
+    } else {
+      const res = await apiPost('addMeal', payload);
+      if (!res || !res.ok) throw new Error((res && res.error) || '保存に失敗しました');
+    }
+    editingMeal = null;
+    closeModals();
+    await loadMealsData(true);
+  } catch (err) {
+    alert(`食事記録の保存エラー:\n${err.message || err}`);
+  } finally {
+    btn.disabled = false; btn.textContent = origLabel;
+  }
+}
+
+async function deleteCurrentMeal() {
+  if (!editingMeal) return;
+  if (!confirm(`「${editingMeal.date} ${editingMeal.mealType}: ${editingMeal.dishName}」を削除しますか？`)) return;
+  const btn = document.getElementById('btn-delete-meal');
+  btn.disabled = true; btn.textContent = '削除中...';
+  try {
+    const res = await apiPost('deleteMeal', { row: editingMeal.row, id: editingMeal.id });
+    if (!res || !res.ok) throw new Error((res && res.error) || '削除に失敗しました');
+    editingMeal = null;
+    closeModals();
+    await loadMealsData(true);
+  } catch (err) {
+    alert(`削除エラー: ${err.message || err}`);
+  } finally {
+    btn.disabled = false; btn.textContent = '🗑️ この食事記録を削除';
+  }
 }
 
 function calcDistanceMeters(lat1, lon1, lat2, lon2) {
@@ -1297,6 +1627,8 @@ async function submitDiary() {
       const okToProceed = confirm(`以下の写真はブラウザで変換できなかったためスキップされます（HEIC非対応環境など）:\n${skippedFiles.join(', ')}\n\nこのまま本文・位置情報を保存しますか？`);
       if (!okToProceed) return;
     }
+    // 撮影/更新日時の新しい順（降順）にソート
+    photos.sort((a, b) => (b.ts || 0) - (a.ts || 0));
 
     btn.textContent = isEdit ? '更新送信中...' : 'サーバーへ送信中...';
     const payload = {
@@ -1376,7 +1708,7 @@ function resizeImageToJpgBase64(file, maxDim, quality) {
         const canvas = document.createElement('canvas');
         canvas.width = w; canvas.height = h;
         canvas.getContext('2d').drawImage(img, 0, 0, w, h);
-        resolve({ name: file.name, base64: canvas.toDataURL('image/jpeg', quality).split(',')[1] });
+        resolve({ name: file.name, ts: file.lastModified || Date.now(), base64: canvas.toDataURL('image/jpeg', quality).split(',')[1] });
       };
       img.onerror = reject; img.src = e.target.result;
     };

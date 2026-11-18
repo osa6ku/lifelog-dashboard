@@ -13,6 +13,8 @@ const SHEET_NAME = '鑑賞記録DB';
 const WATCH_SS_ID = '1dvf7aVJA_B8SgkIB1qGzJztZ6hRPiA7SLb0xssY142E';
 const DIARY_SS_ID = '1_UnbcNhxtEkV7vLagxreIeyELbY3NBLU5bS8pp4YQ1A';
 const DIARY_SHEET_NAME = '日記DB';
+const MEAL_SHEET_NAME = '食事記録DB';
+const MEAL_HEADERS = ['ID', '日付', '食事区分', '料理名', '写真URL', '写真ID', 'カロリー(kcal)', 'タンパク質(g)', '脂質(g)', '炭水化物(g)', '所見・メモ', 'データソース'];
 const JOURNAL_IMAGES_FOLDER_ID = '1kPfAX4TvDpMwokoinA2ga-nCwoePkLyo';
 const JOURNAL_DOCS_FOLDER_ID = '1GqzKeXduc0UF-3Mb8nihfs3SVMSbOPSI';
 const YEAR_DOC_IDS = {
@@ -280,6 +282,10 @@ function doGet(e) {
     const entries = getDiaryEntries(limit);
     return jsonResponse_({ ok: true, count: entries.length, entries });
   }
+  if (api === 'meals') {
+    const entries = getMealEntries();
+    return jsonResponse_({ ok: true, count: entries.length, entries });
+  }
   if (api === 'thumb') {
     const fileId = String((e.parameter && e.parameter.id) || '').trim();
     const full = String((e.parameter && e.parameter.full) || '') === '1';
@@ -304,6 +310,11 @@ function doPost(e) {
     if (action === 'updateDiary') return jsonResponse_(updateDiaryEntry(body.payload || {}));
     if (action === 'deleteDiary') return jsonResponse_(deleteDiaryEntry(body.payload || {}));
     if (action === 'analyzeMeal') return jsonResponse_(analyzeMealEntry(body.payload || {}));
+    if (action === 'addMeal') return jsonResponse_(addMealEntry(body.payload || {}));
+    if (action === 'updateMeal') return jsonResponse_(updateMealEntry(body.payload || {}));
+    if (action === 'deleteMeal') return jsonResponse_(deleteMealEntry(body.payload || {}));
+    if (action === 'importMeals') return jsonResponse_(importMealsBatch(body.payload || {}));
+    if (action === 'batchSortDiaryPhotos') return jsonResponse_(batchSortDiaryPhotos(body.payload || {}));
     return jsonResponse_({ ok: false, error: 'Unknown action: ' + action });
   } catch (err) {
     return jsonResponse_({ ok: false, error: String(err) });
@@ -618,9 +629,12 @@ function saveDiaryPhotos_(dateStr, photos) {
   let firstFileId = '';
   if (!photos || photos.length === 0) return { jpgNames, driveUrls, firstFileId, failedPhotos };
 
+  // ts（撮影日時/更新日時）が付与されている場合は新しい順（降順）にソート
+  const sortedPhotos = [...photos].sort((a, b) => Number((b && b.ts) || 0) - Number((a && a.ts) || 0));
+
   const ym = dateStr.slice(0, 7);
   const ymFolder = getOrCreateSubfolder_(JOURNAL_IMAGES_FOLDER_ID, ym);
-  photos.forEach((p, idx) => {
+  sortedPhotos.forEach((p, idx) => {
     const rawName = String((p && p.name) || `photo_${idx + 1}.jpg`);
     try {
       if (!p || !p.base64) throw new Error('Empty base64');
@@ -782,8 +796,9 @@ function updateDiaryEntry(payload) {
   });
 
   const added = saveDiaryPhotos_(dateStr, payload.photos || []);
-  const allNames = [...keptNames, ...added.jpgNames];
-  const allUrls = [...keptUrls, ...added.driveUrls];
+  // 新しい写真が常に先頭（降順）になるように配置
+  const allNames = [...added.jpgNames, ...keptNames];
+  const allUrls = [...added.driveUrls, ...keptUrls];
 
   if (removeSet.size > 0 || added.jpgNames.length > 0) {
     sheet.getRange(row, 8).setValue(allNames.length);
@@ -1073,4 +1088,214 @@ function analyzeMealEntry(payload) {
   }
 
   return { ok: true, analysis: result, entry: updatedEntry };
+}
+
+function batchSortDiaryPhotos(payload) {
+  const updates = payload.updates || [];
+  if (updates.length === 0) return { ok: true, updated: 0 };
+  const ss = SpreadsheetApp.openById(DIARY_SS_ID);
+  const sheet = ss.getSheetByName(DIARY_SHEET_NAME);
+  let count = 0;
+  updates.forEach(u => {
+    const row = Number(u.row);
+    if (row < 2) return;
+    sheet.getRange(row, 9, 1, 3).setValues([[u.names || '', u.urls || '', u.formula || '']]);
+    count++;
+  });
+  return { ok: true, updated: count };
+}
+
+// ============================================================================
+// 食事単位（朝/昼/夜/間食セット）DB CRUD & 一括インポート
+// ============================================================================
+
+const MEAL_ORDER = { '朝食': 1, '昼食': 2, '夕食': 3, '間食': 4 };
+
+function ensureMealSheet_() {
+  const ss = SpreadsheetApp.openById(DIARY_SS_ID);
+  let sheet = ss.getSheetByName(MEAL_SHEET_NAME);
+  if (!sheet) {
+    sheet = ss.insertSheet(MEAL_SHEET_NAME);
+    sheet.appendRow(MEAL_HEADERS);
+    sheet.getRange(1, 1, 1, MEAL_HEADERS.length).setFontWeight('bold');
+  }
+  return sheet;
+}
+
+function formatMealRow_(row, r) {
+  const photoUrls = String(r[4] || '').split('\n').filter(Boolean);
+  let photoIds = String(r[5] || '').split('\n').filter(Boolean);
+  if (photoIds.length === 0 && photoUrls.length > 0) {
+    photoIds = photoUrls.map(u => {
+      const m = u.match(/\/d\/([^/]+)/);
+      return m ? m[1] : '';
+    }).filter(Boolean);
+  }
+  return {
+    row,
+    id: r[0],
+    date: formatDateVal_(r[1]),
+    mealType: String(r[2] || '昼食'),
+    dishName: String(r[3] || ''),
+    photoUrls,
+    photoIds,
+    calories: r[6] !== '' && r[6] !== null && r[6] !== undefined ? Number(r[6]) : '',
+    protein: r[7] !== '' && r[7] !== null && r[7] !== undefined ? Number(r[7]) : '',
+    fat: r[8] !== '' && r[8] !== null && r[8] !== undefined ? Number(r[8]) : '',
+    carbs: r[9] !== '' && r[9] !== null && r[9] !== undefined ? Number(r[9]) : '',
+    memo: String(r[10] || ''),
+    source: String(r[11] || 'webapp'),
+  };
+}
+
+function getMealEntries() {
+  const ss = SpreadsheetApp.openById(DIARY_SS_ID);
+  const sheet = ss.getSheetByName(MEAL_SHEET_NAME);
+  if (!sheet) return [];
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 2) return [];
+  const values = sheet.getRange(2, 1, lastRow - 1, MEAL_HEADERS.length).getValues();
+  const out = [];
+  for (let i = 0; i < values.length; i++) {
+    const r = values[i];
+    if (!r[1] && !r[3]) continue;
+    out.push(formatMealRow_(i + 2, r));
+  }
+  // 日付降順、同一日内は 朝食→昼食→夕食→間食
+  out.sort((a, b) => {
+    if (a.date !== b.date) return b.date.localeCompare(a.date);
+    return (MEAL_ORDER[a.mealType] || 9) - (MEAL_ORDER[b.mealType] || 9) || Number(a.id) - Number(b.id);
+  });
+  return out;
+}
+
+function addMealEntry(payload) {
+  const sheet = ensureMealSheet_();
+  const dateStr = payload.date || Utilities.formatDate(new Date(), 'Asia/Tokyo', 'yyyy-MM-dd');
+  const mealType = String(payload.mealType || '昼食').trim();
+  const dishName = String(payload.dishName || '').trim();
+  if (!dishName) return { ok: false, error: '料理名を入力してください' };
+
+  const lastRow = sheet.getLastRow();
+  const nextId = lastRow >= 2 ? Number(sheet.getRange(lastRow, 1).getValue() || lastRow - 1) + 1 : 1;
+
+  const { driveUrls } = saveDiaryPhotos_(dateStr, payload.photos || []);
+  const allUrls = [...driveUrls, ...(payload.photoUrls || [])].filter(Boolean);
+  const allIds = allUrls.map(u => {
+    const m = String(u).match(/\/d\/([^/]+)/);
+    return m ? m[1] : '';
+  }).filter(Boolean);
+
+  sheet.appendRow([
+    nextId,
+    dateStr,
+    mealType,
+    dishName,
+    allUrls.join('\n'),
+    allIds.join('\n'),
+    payload.calories !== '' && payload.calories !== undefined ? Number(payload.calories) : '',
+    payload.protein !== '' && payload.protein !== undefined ? Number(payload.protein) : '',
+    payload.fat !== '' && payload.fat !== undefined ? Number(payload.fat) : '',
+    payload.carbs !== '' && payload.carbs !== undefined ? Number(payload.carbs) : '',
+    String(payload.memo || '').trim(),
+    String(payload.source || 'webapp'),
+  ]);
+  const insertedRow = sheet.getLastRow();
+  const r = sheet.getRange(insertedRow, 1, 1, MEAL_HEADERS.length).getValues()[0];
+  return { ok: true, entry: formatMealRow_(insertedRow, r) };
+}
+
+function updateMealEntry(payload) {
+  const sheet = ensureMealSheet_();
+  const row = resolveRowByIdOrIndex_(sheet, 1, payload.row, payload.id);
+  if (row < 2) return { ok: false, error: 'Meal entry not found' };
+
+  const cur = sheet.getRange(row, 1, 1, MEAL_HEADERS.length).getValues()[0];
+  const dateStr = payload.date ? String(payload.date).slice(0, 10) : formatDateVal_(cur[1]);
+  const mealType = payload.mealType !== undefined ? String(payload.mealType).trim() : String(cur[2] || '昼食');
+  const dishName = payload.dishName !== undefined ? String(payload.dishName).trim() : String(cur[3] || '');
+
+  const removeSet = new Set((payload.removeUrls || []).map(String));
+  const prevUrls = String(cur[4] || '').split('\n').filter(Boolean).filter(u => !removeSet.has(u));
+  const added = saveDiaryPhotos_(dateStr, payload.photos || []);
+  const allUrls = [...added.driveUrls, ...prevUrls];
+  const allIds = allUrls.map(u => {
+    const m = u.match(/\/d\/([^/]+)/);
+    return m ? m[1] : '';
+  }).filter(Boolean);
+
+  sheet.getRange(row, 2, 1, 10).setValues([[
+    dateStr,
+    mealType,
+    dishName,
+    allUrls.join('\n'),
+    allIds.join('\n'),
+    payload.calories !== '' && payload.calories !== undefined ? Number(payload.calories) : '',
+    payload.protein !== '' && payload.protein !== undefined ? Number(payload.protein) : '',
+    payload.fat !== '' && payload.fat !== undefined ? Number(payload.fat) : '',
+    payload.carbs !== '' && payload.carbs !== undefined ? Number(payload.carbs) : '',
+    payload.memo !== undefined ? String(payload.memo).trim() : String(cur[10] || ''),
+  ]]);
+
+  const r = sheet.getRange(row, 1, 1, MEAL_HEADERS.length).getValues()[0];
+  return { ok: true, entry: formatMealRow_(row, r) };
+}
+
+function deleteMealEntry(payload) {
+  const sheet = ensureMealSheet_();
+  const row = resolveRowByIdOrIndex_(sheet, 1, payload.row, payload.id);
+  if (row < 2) return { ok: false, error: 'Meal entry not found' };
+  sheet.deleteRow(row);
+  return { ok: true, deletedRow: row };
+}
+
+function importMealsBatch(payload) {
+  const items = payload.meals || [];
+  if (items.length === 0) return { ok: true, imported: 0, skipped: 0 };
+  const sheet = ensureMealSheet_();
+  const lastRow = sheet.getLastRow();
+  const existingKeys = new Set();
+  if (lastRow >= 2) {
+    const vals = sheet.getRange(2, 1, lastRow - 1, 4).getValues();
+    vals.forEach(r => existingKeys.add(`${formatDateVal_(r[1])}|${String(r[2] || '')}|${String(r[3] || '')}`));
+  }
+  let nextId = lastRow >= 2 ? Number(sheet.getRange(lastRow, 1).getValue() || lastRow - 1) + 1 : 1;
+  const rowsToAppend = [];
+  let skipped = 0;
+
+  items.forEach(it => {
+    const dateStr = String(it.date || '').slice(0, 10);
+    const mealType = String(it.mealType || '昼食').trim();
+    const dishName = String(it.dishName || '').trim();
+    if (!dateStr || !dishName) { skipped++; return; }
+    const key = `${dateStr}|${mealType}|${dishName}`;
+    if (existingKeys.has(key)) { skipped++; return; }
+    existingKeys.add(key);
+
+    const urls = Array.isArray(it.photoUrls) ? it.photoUrls : (it.photoUrl ? [it.photoUrl] : []);
+    const ids = Array.isArray(it.photoIds) ? it.photoIds : (it.photoId ? [it.photoId] : urls.map(u => {
+      const m = String(u).match(/\/d\/([^/]+)/);
+      return m ? m[1] : '';
+    }).filter(Boolean));
+
+    rowsToAppend.push([
+      nextId++,
+      dateStr,
+      mealType,
+      dishName,
+      urls.join('\n'),
+      ids.join('\n'),
+      it.calories !== '' && it.calories !== undefined ? Number(it.calories) : '',
+      it.protein !== '' && it.protein !== undefined ? Number(it.protein) : '',
+      it.fat !== '' && it.fat !== undefined ? Number(it.fat) : '',
+      it.carbs !== '' && it.carbs !== undefined ? Number(it.carbs) : '',
+      String(it.memo || '').trim(),
+      String(it.source || 'muse'),
+    ]);
+  });
+
+  if (rowsToAppend.length > 0) {
+    sheet.getRange(sheet.getLastRow() + 1, 1, rowsToAppend.length, MEAL_HEADERS.length).setValues(rowsToAppend);
+  }
+  return { ok: true, imported: rowsToAppend.length, skipped };
 }
