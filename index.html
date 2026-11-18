@@ -9,7 +9,7 @@
   <link rel="manifest" href="./manifest.json">
   <link rel="apple-touch-icon" href="./apple-touch-icon.png">
   <link rel="icon" type="image/png" href="./icon-192.png">
-  <title>ライフログ・ダッシュボード v1.11.0</title>
+  <title>ライフログ・ダッシュボード v1.11.1</title>
   <style>
     :root {
       --bg: #f4f6f9;
@@ -86,6 +86,8 @@
       box-shadow: 0 1px 3px rgba(0,0,0,0.06); border: 1px solid var(--border);
     }
     .card-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; }
+    .card-header { display: flex; flex-direction: column; gap: 3px; }
+    .card-date { font-size: 12px; font-weight: 700; color: var(--muted); }
     .card-title { font-size: 16px; font-weight: 700; margin: 0; }
     .badge {
       font-size: 11px; font-weight: 700; padding: 3px 8px; border-radius: 999px;
@@ -258,7 +260,7 @@
   <div class="header-top">
     <h1 class="app-title">📚 ライフログ・ダッシュボード</h1>
     <div class="header-right">
-      <span class="ver-badge" id="app-version">v1.11.0</span>
+      <span class="ver-badge" id="app-version">v1.11.1</span>
       <button class="btn-sm" id="btn-check-update" onclick="manualCheckUpdate()" title="最新バージョン確認・更新">🔄 更新</button>
     </div>
   </div>
@@ -489,7 +491,7 @@
 </div>
 
 <script>
-const APP_VERSION = 'v1.11.0';
+const APP_VERSION = 'v1.11.1';
 const GAS_API_URL = 'https://script.google.com/macros/s/AKfycbxLecFd_9FWeR-2w2ThU5SYS7es-0IVKODoLWYgDJGfsoiQzsSRF9IFMAhtZTPl17CDKw/exec';
 
 let watchData = [];
@@ -787,6 +789,12 @@ function normalizeDiaryLocations(d) {
   return parseLocations(d && d.location).map(name => ({ name, lat: null, lng: null }));
 }
 
+function formatDiaryDateLabel(dateStr, weekday) {
+  const m = String(dateStr || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  const base = m ? `${Number(m[1])}年${Number(m[2])}月${Number(m[3])}日` : String(dateStr || '');
+  return weekday ? `${base} (${weekday})` : base;
+}
+
 function buildDiaryCardHtml(d) {
   const placeholder = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
   const ids = d.imageIds || [];
@@ -831,9 +839,14 @@ function buildDiaryCardHtml(d) {
     }
   }
 
+  const cleanTitle = String(d.title || '').trim();
+  const titleHtml = cleanTitle ? `<h3 class="card-title">${esc(cleanTitle)}</h3>` : '';
   return `
-    <div class="card" id="dcard-${Number(d.row || 0)}">
-      <div class="card-head"><div class="card-title">${esc(d.date)} (${esc(d.weekday)}) ${esc(d.title || '')}</div></div>
+    <div class="card diary-card" id="dcard-${Number(d.row || 0)}">
+      <div class="card-header">
+        <div class="card-date">${esc(formatDiaryDateLabel(d.date, d.weekday))}</div>
+        ${titleHtml}
+      </div>
       ${locHtml}
       ${mediaHtml}
       <div class="card-summary" style="white-space:pre-wrap;">${esc(d.body)}</div>
