@@ -9,7 +9,7 @@
   <link rel="manifest" href="./manifest.json">
   <link rel="apple-touch-icon" href="./apple-touch-icon.png">
   <link rel="icon" type="image/png" href="./icon-192.png">
-  <title>ライフログ・ダッシュボード v1.9.0</title>
+  <title>ライフログ・ダッシュボード v1.10.0</title>
   <style>
     :root {
       --bg: #f4f6f9;
@@ -244,7 +244,7 @@
   <div class="header-top">
     <h1 class="app-title">📚 ライフログ・ダッシュボード</h1>
     <div class="header-right">
-      <span class="ver-badge" id="app-version">v1.9.0</span>
+      <span class="ver-badge" id="app-version">v1.10.0</span>
       <button class="btn-sm" id="btn-check-update" onclick="manualCheckUpdate()" title="最新バージョン確認・更新">🔄 更新</button>
     </div>
   </div>
@@ -367,7 +367,7 @@
       <label>場所・位置情報（複数スポット追加可）</label>
       <div id="d-loc-chips" class="loc-chips"></div>
       <div class="loc-row">
-        <input id="d-loc" placeholder="場所名を入力して ＋ / 🔍 / 📍" onkeydown="if(event.key==='Enter'){event.preventDefault();addLocationFromInput();}">
+        <input id="d-loc" placeholder="場所名を入力して ＋ / 🔍 / 📍" onfocus="showLocationHistory()" oninput="showLocationHistory()" onkeydown="if(event.key==='Enter'){event.preventDefault();addLocationFromInput();}">
         <button type="button" class="btn-icon" onclick="addLocationFromInput()" title="入力した場所を追加">＋</button>
         <button type="button" class="btn-icon" id="btn-loc-gps" onclick="fetchNearbyLocations()" title="現在地から周辺スポットを取得">📍</button>
         <button type="button" class="btn-icon" id="btn-loc-search" onclick="searchLocationByKeyword()" title="キーワードで場所を検索">🔍</button>
@@ -470,7 +470,7 @@
 </div>
 
 <script>
-const APP_VERSION = 'v1.9.0';
+const APP_VERSION = 'v1.10.0';
 const GAS_API_URL = 'https://script.google.com/macros/s/AKfycbxLecFd_9FWeR-2w2ThU5SYS7es-0IVKODoLWYgDJGfsoiQzsSRF9IFMAhtZTPl17CDKw/exec';
 
 let watchData = [];
@@ -1159,6 +1159,7 @@ function resetLocationPicker() {
 }
 
 function openDiaryModal() {
+  if (diaryData.length === 0) loadDiaryData(false).catch(() => {});
   editingDiary = null;
   diaryLocations = [];
   removedPhotoUrls = new Set();
@@ -1426,12 +1427,86 @@ function renderLocationSuggestions(items) {
   box.style.display = 'block';
 }
 
+const LOC_HISTORY_KEY = 'lifelog_loc_history_v1';
+
+function getSavedLocHistory() {
+  try {
+    const raw = localStorage.getItem(LOC_HISTORY_KEY);
+    const arr = raw ? JSON.parse(raw) : [];
+    return Array.isArray(arr) ? arr : [];
+  } catch (e) { return []; }
+}
+
+function saveLocationToHistory(locs) {
+  if (!Array.isArray(locs) || locs.length === 0) return;
+  try {
+    const cur = getSavedLocHistory();
+    const map = new Map();
+    locs.concat(cur).forEach(l => {
+      const name = String((l && l.name) || '').trim();
+      if (!name) return;
+      const lat = (l.lat !== null && l.lat !== undefined && !isNaN(Number(l.lat))) ? Number(l.lat) : null;
+      const lng = (l.lng !== null && l.lng !== undefined && !isNaN(Number(l.lng))) ? Number(l.lng) : null;
+      if (!map.has(name)) {
+        map.set(name, { name, lat, lng });
+      } else if (lat !== null && lng !== null && map.get(name).lat === null) {
+        map.set(name, { name, lat, lng });
+      }
+    });
+    localStorage.setItem(LOC_HISTORY_KEY, JSON.stringify(Array.from(map.values()).slice(0, 50)));
+  } catch (e) { /* ignore */ }
+}
+
+function getDiaryLocationHistory(query) {
+  const q = String(query || '').trim().toLowerCase();
+  const map = new Map();
+  const pushLoc = (l, sourceLabel) => {
+    const name = String((l && l.name) || '').trim();
+    if (!name) return;
+    if (q && !name.toLowerCase().includes(q)) return;
+    const lat = (l.lat !== null && l.lat !== undefined && !isNaN(Number(l.lat))) ? Number(l.lat) : null;
+    const lng = (l.lng !== null && l.lng !== undefined && !isNaN(Number(l.lng))) ? Number(l.lng) : null;
+    if (!map.has(name)) {
+      map.set(name, {
+        name,
+        lat,
+        lng,
+        sub: lat !== null ? `${sourceLabel} (座標あり)` : sourceLabel,
+      });
+    } else if (lat !== null && lng !== null && map.get(name).lat === null) {
+      map.set(name, { name, lat, lng, sub: `${sourceLabel} (座標あり)` });
+    }
+  };
+
+  getSavedLocHistory().forEach(l => pushLoc(l, '🕒 最近の履歴'));
+  diaryData.forEach(d => {
+    normalizeDiaryLocations(d).forEach(l => pushLoc(l, `🕒 ${d.date} の履歴`));
+  });
+  return Array.from(map.values()).slice(0, q ? 10 : 15);
+}
+
+function showLocationHistory() {
+  const q = document.getElementById('d-loc').value;
+  const hist = getDiaryLocationHistory(q);
+  const statusEl = document.getElementById('loc-status');
+  if (hist.length > 0) {
+    statusEl.textContent = q.trim()
+      ? `履歴候補 ${hist.length}件（タップで追加 / 🔍で新規検索）`
+      : `最近の場所履歴 ${hist.length}件（タップで追加）`;
+    renderLocationSuggestions(hist);
+  } else {
+    renderLocationSuggestions([]);
+  }
+}
+
 function selectLocationCandidate(idx) {
   const it = lastLocationCandidates[idx];
   if (!it) return;
-  addDiaryLocation({ name: it.name, lat: it.lat !== undefined ? it.lat : null, lng: it.lng !== undefined ? it.lng : null });
+  const locObj = { name: it.name, lat: it.lat !== undefined ? it.lat : null, lng: it.lng !== undefined ? it.lng : null };
+  addDiaryLocation(locObj);
+  saveLocationToHistory([locObj]);
   document.getElementById('d-loc').value = '';
-  const coordNote = (it.lat !== null && it.lat !== undefined) ? ' (座標取得済)' : '';
+  const coordNote = (locObj.lat !== null && locObj.lat !== undefined) ? ' (座標取得済)' : '';
   document.getElementById('loc-status').textContent = `追加済み: ${it.name}${coordNote}（計${diaryLocations.length}件・さらに追加可）`;
   document.getElementById('loc-suggestions').style.display = 'none';
 }
@@ -1512,7 +1587,10 @@ async function searchLocationByKeyword() {
   const q = document.getElementById('d-loc').value.trim();
   const statusEl = document.getElementById('loc-status');
   if (!q) {
-    statusEl.textContent = '検索したい駅名・店舗名・地名を入力してください';
+    showLocationHistory();
+    if (getDiaryLocationHistory('').length === 0) {
+      statusEl.textContent = '検索したい駅名・店舗名・地名を入力してください';
+    }
     document.getElementById('d-loc').focus();
     return;
   }
@@ -1520,27 +1598,62 @@ async function searchLocationByKeyword() {
   btn.disabled = true;
   statusEl.textContent = `🔍 「${q}」を検索中...`;
   try {
-    const url = `https://nominatim.openstreetmap.org/search?format=jsonv2&q=${encodeURIComponent(q)}&accept-language=ja&addressdetails=1&limit=8`;
-    const res = await fetch(url);
-    if (!res.ok) throw new Error('Search failed');
-    const list = await res.json();
-    const items = (list || []).map(r => {
-      const primary = r.name || String(r.display_name || '').split(',')[0].trim();
-      const addrSub = formatAddrSummary(r.address) || String(r.display_name || '');
-      const lat = r.lat !== undefined ? Number(r.lat) : null;
-      const lng = r.lon !== undefined ? Number(r.lon) : null;
-      return { name: primary, sub: addrSub, lat, lng };
-    }).filter(it => it.name);
+    let items = [];
+    let sourceName = 'OpenStreetMap';
 
+    // 1. OpenStreetMap Nominatim 検索
+    try {
+      const url = `https://nominatim.openstreetmap.org/search?format=jsonv2&q=${encodeURIComponent(q)}&accept-language=ja&addressdetails=1&limit=8`;
+      const res = await fetch(url);
+      if (res.ok) {
+        const list = await res.json();
+        items = (list || []).map(r => {
+          const primary = r.name || String(r.display_name || '').split(',')[0].trim();
+          const addrSub = formatAddrSummary(r.address) || String(r.display_name || '');
+          const lat = r.lat !== undefined ? Number(r.lat) : null;
+          const lng = r.lon !== undefined ? Number(r.lon) : null;
+          return { name: primary, sub: addrSub, lat, lng };
+        }).filter(it => it.name);
+      }
+    } catch (e) { /* fallback to GSI */ }
+
+    // 2. Nominatim がエラーまたは0件の場合、国土地理院 住所検索APIへ自動フォールバック
     if (items.length === 0) {
+      sourceName = '国土地理院';
+      const gsiUrl = `https://msearch.gsi.go.jp/address-search/AddressSearch?q=${encodeURIComponent(q)}`;
+      const gRes = await fetch(gsiUrl);
+      if (gRes.ok) {
+        const gList = await gRes.json();
+        items = (gList || []).slice(0, 10).map(r => {
+          const title = String((r.properties && r.properties.title) || '').trim();
+          const coords = (r.geometry && r.geometry.coordinates) || [];
+          const lng = coords.length >= 2 ? Number(coords[0]) : null;
+          const lat = coords.length >= 2 ? Number(coords[1]) : null;
+          return { name: title, sub: '国土地理院 住所・施設検索', lat, lng };
+        }).filter(it => it.name);
+      }
+    }
+
+    // 3. キーワードに一致する過去履歴も先頭へ統合（重複除外）
+    const histMatches = getDiaryLocationHistory(q);
+    const seenNames = new Set(histMatches.map(h => h.name));
+    const merged = [...histMatches, ...items.filter(it => !seenNames.has(it.name))];
+
+    if (merged.length === 0) {
       statusEl.textContent = '該当する場所が見つかりませんでした（そのまま自由入力で保存できます）';
       renderLocationSuggestions([]);
     } else {
-      statusEl.textContent = `検索結果 ${items.length}件（タップで選択）`;
-      renderLocationSuggestions(items);
+      statusEl.textContent = `候補 ${merged.length}件（履歴＋${sourceName}・タップで選択）`;
+      renderLocationSuggestions(merged);
     }
   } catch (err) {
-    statusEl.textContent = '⚠️ 場所検索に失敗しました（ネットワーク状況をご確認ください）';
+    const histMatches = getDiaryLocationHistory(q);
+    if (histMatches.length > 0) {
+      statusEl.textContent = `過去履歴から ${histMatches.length}件を表示中`;
+      renderLocationSuggestions(histMatches);
+    } else {
+      statusEl.textContent = '⚠️ 場所検索に失敗しました（ネットワーク状況をご確認ください）';
+    }
   } finally {
     btn.disabled = false;
   }
@@ -1723,6 +1836,7 @@ async function submitDiary() {
       carbs: document.getElementById('d-c').value,
       nutritionAdvice: document.getElementById('d-nut-advice').value,
     };
+    saveLocationToHistory(diaryLocations);
 
     if (isEdit) {
       payload.row = editingDiary.row;
