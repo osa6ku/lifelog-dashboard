@@ -318,6 +318,7 @@ function doPost(e) {
     if (action === 'migrateMealPhotosToDiary') return jsonResponse_(migrateMealPhotosToDiary());
     if (action === 'batchSortDiaryPhotos') return jsonResponse_(batchSortDiaryPhotos(body.payload || {}));
     if (action === 'batchUpdateDiaryLocations') return jsonResponse_(batchUpdateDiaryLocations(body.payload || {}));
+    if (action === 'batchUpdateWatchMemos') return jsonResponse_(batchUpdateWatchMemos(body.payload || {}));
     return jsonResponse_({ ok: false, error: 'Unknown action: ' + action });
   } catch (err) {
     return jsonResponse_({ ok: false, error: String(err) });
@@ -501,6 +502,16 @@ function deleteWatchEntry(payload) {
   if (row < 2) return { ok: false, error: 'Watch entry not found' };
   sheet.deleteRow(row);
   return { ok: true, deletedRow: row };
+}
+
+function batchUpdateWatchMemos(payload) {
+  const values = payload.values || [];
+  if (values.length === 0) return { ok: false, error: 'Empty values' };
+  const ss = SpreadsheetApp.openById(WATCH_SS_ID);
+  const sheet = ss.getSheetByName(SHEET_NAME);
+  const range = sheet.getRange(2, COL.MEMO, values.length, 1);
+  range.setValues(values.map(v => [String(v === null || v === undefined ? '' : v)]));
+  return { ok: true, updatedRows: values.length };
 }
 
 const DIARY_NUTRITION_HEADERS = ['食事区分', '推定カロリー(kcal)', '栄養バランス(PFC・所見)', '位置情報JSON'];
