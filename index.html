@@ -363,6 +363,46 @@ async function quickUpdate(row, changes) {
   renderWatch();
 }
 
+const thumbMemCache = {};
+let thumbObserver = null;
+
+function ensureThumbObserver() {
+  if (thumbObserver) thumbObserver.disconnect();
+  thumbObserver = new IntersectionObserver((entries, obs) => {
+    entries.forEach(entry => {
+      if (!entry.isIntersecting) return;
+      const img = entry.target;
+      obs.unobserve(img);
+      const fid = img.dataset.fileId;
+      if (fid) loadThumbIntoImg(img, fid);
+    });
+  }, { rootMargin: '200px' });
+}
+
+async function loadThumbIntoImg(img, fid) {
+  const cached = thumbMemCache[fid] || safeSessionGet(`thumb_${fid}`);
+  if (cached) {
+    thumbMemCache[fid] = cached;
+    img.src = cached;
+    return;
+  }
+  try {
+    const res = await apiGet({ api: 'thumb', id: fid });
+    if (res && res.ok && res.dataUrl) {
+      thumbMemCache[fid] = res.dataUrl;
+      safeSessionSet(`thumb_${fid}`, res.dataUrl);
+      img.src = res.dataUrl;
+    }
+  } catch (e) { /* ignore */ }
+}
+
+function safeSessionGet(k) {
+  try { return sessionStorage.getItem(k); } catch (e) { return null; }
+}
+function safeSessionSet(k, v) {
+  try { sessionStorage.setItem(k, v); } catch (e) {}
+}
+
 function renderDiary() {
   const q = document.getElementById('diary-search').value.trim().toLowerCase();
   const ym = document.getElementById('diary-ym').value;
@@ -374,11 +414,12 @@ function renderDiary() {
   document.getElementById('diary-count').textContent = `表示中: ${list.length}件（直近取得${diaryData.length}件）`;
   const container = document.getElementById('diary-list');
   if (list.length === 0) { container.innerHTML = '<div class="loading">該当する日記がありません</div>'; return; }
+  const placeholder = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
   container.innerHTML = list.map(d => {
-    const thumbs = d.thumbnails || [];
+    const ids = d.imageIds || [];
     const urls = d.imageUrls || [];
-    const mediaHtml = thumbs.length > 0
-      ? `<div class="thumb-strip">${thumbs.map((t, i) => `<img class="thumb-img" loading="lazy" src="${esc(t)}" alt="写真${i + 1}" onclick="openImagePreview('${esc(t)}','${esc(urls[i] || t)}')">`).join('')}</div>`
+    const mediaHtml = ids.length > 0
+      ? `<div class="thumb-strip">${ids.map((fid, i) => `<img class="thumb-img" data-file-id="${esc(fid)}" src="${placeholder}" alt="写真${i + 1}" onclick="openImagePreview('${esc(fid)}','${esc(urls[i] || '')}')">`).join('')}</div>`
       : (urls.length > 0 ? `<div class="meta-row" style="margin-top:8px;">${urls.map((u, i) => `<a class="q-link" target="_blank" href="${esc(u)}">📷 写真${i + 1}</a>`).join('')}</div>` : '');
     return `
     <div class="card">
@@ -388,12 +429,20 @@ function renderDiary() {
       ${mediaHtml}
     </div>`;
   }).join('');
+
+  ensureThumbObserver();
+  container.querySelectorAll('img.thumb-img[data-file-id]').forEach(img => thumbObserver.observe(img));
 }
 
-function openImagePreview(thumbUrl, driveUrl) {
-  document.getElementById('preview-img').src = thumbUrl.replace('&sz=w400', '&sz=w1200');
-  document.getElementById('preview-drive-link').href = driveUrl;
+async function openImagePreview(fid, driveUrl) {
+  const preview = document.getElementById('preview-img');
+  preview.src = thumbMemCache[fid] || '';
+  document.getElementById('preview-drive-link').href = driveUrl || `https://drive.google.com/file/d/${fid}/view`;
   document.getElementById('modal-image').classList.add('open');
+  try {
+    const res = await apiGet({ api: 'thumb', id: fid, full: '1' });
+    if (res && res.ok && res.dataUrl) preview.src = res.dataUrl;
+  } catch (e) { /* keep thumb */ }
 }
 
 function openWatchModal() { document.getElementById('modal-watch').classList.add('open'); }

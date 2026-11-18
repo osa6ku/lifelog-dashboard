@@ -279,6 +279,11 @@ function doGet(e) {
     const entries = getDiaryEntries(limit);
     return jsonResponse_({ ok: true, count: entries.length, entries });
   }
+  if (api === 'thumb') {
+    const fileId = String((e.parameter && e.parameter.id) || '').trim();
+    const full = String((e.parameter && e.parameter.full) || '') === '1';
+    return jsonResponse_(getImageDataUrl_(fileId, full));
+  }
   return HtmlService.createHtmlOutputFromFile('index')
     .setTitle('ライフログ・ダッシュボード')
     .addMetaTag('viewport', 'width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no')
@@ -420,9 +425,9 @@ function getDiaryEntries(limit) {
   for (let i = values.length - 1; i >= 0; i--) {
     const r = values[i];
     const imageUrls = String(r[9] || '').split('\n').filter(Boolean);
-    const thumbnails = imageUrls.map(u => {
+    const imageIds = imageUrls.map(u => {
       const m = u.match(/\/d\/([^/]+)/);
-      return m ? `https://drive.google.com/thumbnail?id=${m[1]}&sz=w400` : '';
+      return m ? m[1] : '';
     }).filter(Boolean);
     out.push({
       id: r[0],
@@ -433,10 +438,24 @@ function getDiaryEntries(limit) {
       location: String(r[6] || ''),
       imageCount: Number(r[7] || 0),
       imageUrls,
-      thumbnails,
+      imageIds,
     });
   }
   return out;
+}
+
+function getImageDataUrl_(fileId, full) {
+  if (!fileId) return { ok: false, error: 'Missing fileId' };
+  try {
+    const file = DriveApp.getFileById(fileId);
+    let blob = full ? null : file.getThumbnail();
+    if (!blob) blob = file.getBlob();
+    const mime = blob.getContentType() || 'image/jpeg';
+    const b64 = Utilities.base64Encode(blob.getBytes());
+    return { ok: true, id: fileId, dataUrl: `data:${mime};base64,${b64}` };
+  } catch (err) {
+    return { ok: false, id: fileId, error: String(err) };
+  }
 }
 
 function addDiaryEntry(payload) {
