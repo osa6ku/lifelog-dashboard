@@ -9,7 +9,7 @@
   <link rel="manifest" href="./manifest.json">
   <link rel="apple-touch-icon" href="./apple-touch-icon.png">
   <link rel="icon" type="image/png" href="./icon-192.png">
-  <title>ライフログ・ダッシュボード v1.7.0</title>
+  <title>ライフログ・ダッシュボード v1.8.0</title>
   <style>
     :root {
       --bg: #f4f6f9;
@@ -244,7 +244,7 @@
   <div class="header-top">
     <h1 class="app-title">📚 ライフログ・ダッシュボード</h1>
     <div class="header-right">
-      <span class="ver-badge" id="app-version">v1.7.0</span>
+      <span class="ver-badge" id="app-version">v1.8.0</span>
       <button class="btn-sm" id="btn-check-update" onclick="manualCheckUpdate()" title="最新バージョン確認・更新">🔄 更新</button>
     </div>
   </div>
@@ -454,11 +454,6 @@
     </div>
     <div class="field"><label>塩分(g)</label><input id="m-salt" type="number" step="0.1" min="0" placeholder="例: 2.5"></div>
     <div class="field"><label>所見・メモ</label><input id="m-memo" placeholder="栄養メモや店舗名など"></div>
-    <div class="field">
-      <label>食事写真（任意）</label>
-      <div id="m-existing-photos" class="edit-photo-list"></div>
-      <input id="m-photos" type="file" accept="image/*" multiple>
-    </div>
     <button class="btn-big btn-diary" style="width:100%;" id="btn-save-meal" onclick="submitMeal()">食事を保存する</button>
     <button class="btn-danger" id="btn-delete-meal" style="display:none;" onclick="deleteCurrentMeal()">🗑️ この食事記録を削除</button>
   </div>
@@ -475,7 +470,7 @@
 </div>
 
 <script>
-const APP_VERSION = 'v1.7.0';
+const APP_VERSION = 'v1.8.0';
 const GAS_API_URL = 'https://script.google.com/macros/s/AKfycbxLecFd_9FWeR-2w2ThU5SYS7es-0IVKODoLWYgDJGfsoiQzsSRF9IFMAhtZTPl17CDKw/exec';
 
 let watchData = [];
@@ -486,7 +481,6 @@ let editingDiary = null;
 let editingMeal = null;
 let diaryLocations = [];
 let removedPhotoUrls = new Set();
-let removedMealPhotoUrls = new Set();
 let diaryDisplayLimit = 80;
 let statusFilter = '進行中';
 let catFilter = 'ALL';
@@ -758,8 +752,8 @@ function buildDiaryCardHtml(d) {
   let mealHtml = '';
   if (dayMeals.length > 0) {
     const sumK = dayMeals.reduce((s, m) => s + Number(m.calories || 0), 0);
-    const mealPills = dayMeals.map(m => `<span class="meal-badge" style="margin-top:4px;cursor:pointer;" onclick="openEditMealModal(${m.row}, '${esc(m.id)}')">${esc(m.mealType)}: ${esc(m.dishName)}${m.calories ? ` (${esc(m.calories)}kcal)` : ''}</span>`).join(' ');
-    mealHtml = `<div style="margin-top:6px;">${mealPills}${sumK ? ` <span style="font-size:11px;color:var(--muted);">(計${sumK}kcal)</span>` : ''}</div>`;
+    const mealPills = dayMeals.map(m => `<span class="meal-badge" style="margin-top:4px;cursor:pointer;" onclick="goToMealDate('${esc(d.date)}')">${esc(m.mealType)}: ${esc(m.dishName)}${m.calories ? ` (${esc(m.calories)}kcal)` : ''}</span>`).join(' ');
+    mealHtml = `<div style="margin-top:6px;"><span style="font-size:11px;font-weight:700;color:#047857;cursor:pointer;" onclick="goToMealDate('${esc(d.date)}')">🍽️ 食事記録へ (${dayMeals.length}食${sumK ? ` / 計${sumK}kcal` : ''}) ›</span><div>${mealPills}</div></div>`;
   } else {
     const hasMeal = d.calories !== '' && d.calories !== undefined && d.calories !== null;
     const pfcParts = [
@@ -908,7 +902,6 @@ function renderNutritionView() {
     grouped[m.date].push(m);
   });
   const sortedDates = Object.keys(grouped).sort((a, b) => b.localeCompare(a));
-  const placeholder = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
 
   countEl.textContent = `食事単位セット記録: ${mealData.length}食（${sortedDates.length}日分）`;
   if (sortedDates.length === 0) {
@@ -927,11 +920,6 @@ function renderNutritionView() {
       const subCarbSum = hasAnySubCarb ? ` [糖:${dSugar} 繊:${dFiber}]` : '';
       const rowsHtml = items.map(m => {
         const mtClass = m.mealType === '朝食' ? 'mt-朝' : m.mealType === '昼食' ? 'mt-昼' : m.mealType === '夕食' ? 'mt-夕' : 'mt-間';
-        const firstId = (m.photoIds && m.photoIds[0]) || '';
-        const firstUrl = (m.photoUrls && m.photoUrls[0]) || '';
-        const thumbHtml = firstId
-          ? `<img class="meal-set-thumb" data-file-id="${esc(firstId)}" src="${placeholder}" alt="${esc(m.dishName)}" onclick="openImagePreview('${esc(firstId)}','${esc(firstUrl)}')">`
-          : '';
         const hasPfc = m.protein !== '' || m.fat !== '' || m.carbs !== '';
         const subCarbParts = [
           m.sugar !== '' && m.sugar !== undefined ? `糖質:${esc(m.sugar)}g` : '',
@@ -941,7 +929,6 @@ function renderNutritionView() {
         const saltPart = m.salt !== '' && m.salt !== undefined ? ` / 塩分:${esc(m.salt)}g` : '';
         return `
           <div class="meal-set-row">
-            ${thumbHtml}
             <div style="flex:1;min-width:0;">
               <div>
                 <span class="meal-type-pill ${mtClass}">${esc(m.mealType)}</span>
@@ -957,16 +944,17 @@ function renderNutritionView() {
           </div>`;
       }).join('');
       return `
-        <div class="card">
+        <div class="card" id="meal-day-${esc(date)}">
           <div class="meal-day-head">
             <span>📅 ${esc(date)}</span>
-            <span style="font-size:12px;color:#047857;">計 ${dKcal} kcal (P:${dP} F:${dF} C:${dC}${subCarbSum} 塩分:${dSalt}g)</span>
+            <button class="btn-sm primary" onclick="goToDiaryDate('${esc(date)}')">📓 日記を見る</button>
+          </div>
+          <div style="font-size:12px;color:#047857;font-weight:700;margin-bottom:6px;">
+            合計: ${dKcal} kcal (P:${dP} F:${dF} C:${dC}${subCarbSum} 塩分:${dSalt}g)
           </div>
           ${rowsHtml}
         </div>`;
     }).join('');
-    ensureThumbObserver();
-    listEl.querySelectorAll('img.meal-set-thumb[data-file-id]').forEach(img => thumbObserver.observe(img));
   }
 
   // 〜2026-11-11 あすけん1日まとめ履歴（既存データ保持表示）
@@ -1174,34 +1162,55 @@ function closeModals() {
   document.getElementById('modal-image').classList.remove('open');
 }
 
-function renderMealExistingPhotos(entry) {
-  const wrap = document.getElementById('m-existing-photos');
-  const urls = (entry && entry.photoUrls) || [];
-  const ids = (entry && entry.photoIds) || [];
-  if (urls.length === 0) { wrap.innerHTML = ''; return; }
-  wrap.innerHTML = urls.map((u, idx) => {
-    const fid = ids[idx] || '';
-    const isRemoved = removedMealPhotoUrls.has(u);
-    const src = (fid && thumbMemCache[fid]) ? thumbMemCache[fid] : 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
-    return `
-      <div class="edit-photo-item ${isRemoved ? 'removed' : ''}">
-        <img class="thumb-img" style="width:76px;height:76px;" data-file-id="${esc(fid)}" src="${src}" alt="食事写真${idx + 1}">
-        <button type="button" class="edit-photo-del" onclick="toggleRemoveMealPhoto('${esc(u)}')">${isRemoved ? '↺' : '✕'}</button>
-      </div>`;
-  }).join('');
-  ensureThumbObserver();
-  wrap.querySelectorAll('img.thumb-img[data-file-id]').forEach(img => thumbObserver.observe(img));
+function highlightElement(el) {
+  if (!el) return;
+  el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  el.style.transition = 'box-shadow 0.3s';
+  el.style.boxShadow = '0 0 0 3px #1a73e8';
+  setTimeout(() => { el.style.boxShadow = ''; }, 1800);
 }
 
-function toggleRemoveMealPhoto(url) {
-  if (removedMealPhotoUrls.has(url)) removedMealPhotoUrls.delete(url);
-  else removedMealPhotoUrls.add(url);
-  renderMealExistingPhotos(editingMeal);
+async function goToMealDate(date) {
+  switchTab('nutrition');
+  if (mealData.length === 0) await loadMealsData(true);
+  setTimeout(() => highlightElement(document.getElementById(`meal-day-${date}`)), 80);
+}
+
+async function goToDiaryDate(date) {
+  document.getElementById('diary-search').value = '';
+  document.getElementById('diary-ym').value = '';
+  switchTab('diary');
+  if (diaryData.length === 0) await loadDiaryData(false);
+
+  let idx = diaryData.findIndex(d => d.date === date);
+  if (idx < 0) {
+    // 未作成の日は日記の受け皿を自動作成して遷移
+    try {
+      const res = await apiPost('addDiary', {
+        date,
+        title: `${date}の日記`,
+        body: '（食事記録から作成）',
+        location: '',
+      });
+      if (res && res.ok) {
+        await loadDiaryData(false);
+        idx = diaryData.findIndex(d => d.date === date);
+      }
+    } catch (e) { /* fallback to modal */ }
+  }
+  if (idx >= 0) {
+    if (idx >= diaryDisplayLimit) diaryDisplayLimit = idx + 20;
+    renderDiary();
+    const target = diaryData[idx];
+    setTimeout(() => highlightElement(document.getElementById(`dcard-${Number(target.row || 0)}`)), 80);
+  } else {
+    openDiaryModal();
+    document.getElementById('d-date').value = date;
+  }
 }
 
 function openMealModal(presetDate) {
   editingMeal = null;
-  removedMealPhotoUrls = new Set();
   document.getElementById('meal-modal-title').textContent = '🍽️ 食事を記録';
   document.getElementById('btn-save-meal').textContent = '食事を保存する';
   document.getElementById('btn-delete-meal').style.display = 'none';
@@ -1216,8 +1225,6 @@ function openMealModal(presetDate) {
   document.getElementById('m-fiber').value = '';
   document.getElementById('m-salt').value = '';
   document.getElementById('m-memo').value = '';
-  document.getElementById('m-photos').value = '';
-  renderMealExistingPhotos(null);
   document.getElementById('modal-meal').classList.add('open');
 }
 
@@ -1225,7 +1232,6 @@ function openEditMealModal(row, id) {
   const m = mealData.find(x => (row && x.row === row) || String(x.id) === String(id));
   if (!m) return;
   editingMeal = m;
-  removedMealPhotoUrls = new Set();
   document.getElementById('meal-modal-title').textContent = '✏️ 食事記録を編集';
   document.getElementById('btn-save-meal').textContent = '変更を保存する';
   document.getElementById('btn-delete-meal').style.display = 'block';
@@ -1240,8 +1246,6 @@ function openEditMealModal(row, id) {
   document.getElementById('m-fiber').value = m.fiber !== '' && m.fiber !== undefined ? m.fiber : '';
   document.getElementById('m-salt').value = m.salt !== '' && m.salt !== undefined ? m.salt : '';
   document.getElementById('m-memo').value = m.memo || '';
-  document.getElementById('m-photos').value = '';
-  renderMealExistingPhotos(m);
   document.getElementById('modal-meal').classList.add('open');
 }
 
@@ -1282,13 +1286,6 @@ async function submitMeal() {
   const origLabel = isEdit ? '変更を保存する' : '食事を保存する';
   btn.disabled = true; btn.textContent = '保存中...';
   try {
-    const files = Array.from(document.getElementById('m-photos').files || []);
-    const photos = [];
-    for (const f of files) {
-      try { photos.push(await resizeImageToJpgBase64(f, 1200, 0.8)); } catch (e) { /* skip */ }
-    }
-    photos.sort((a, b) => (b.ts || 0) - (a.ts || 0));
-
     const payload = {
       date: document.getElementById('m-date').value,
       mealType: document.getElementById('m-type').value,
@@ -1301,12 +1298,10 @@ async function submitMeal() {
       fiber: document.getElementById('m-fiber').value,
       salt: document.getElementById('m-salt').value,
       memo: document.getElementById('m-memo').value,
-      photos,
     };
     if (isEdit) {
       payload.row = editingMeal.row;
       payload.id = editingMeal.id;
-      payload.removeUrls = Array.from(removedMealPhotoUrls);
       const res = await apiPost('updateMeal', payload);
       if (!res || !res.ok) throw new Error((res && res.error) || '更新に失敗しました');
     } else {

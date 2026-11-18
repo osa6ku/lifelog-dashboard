@@ -314,6 +314,7 @@ function doPost(e) {
     if (action === 'updateMeal') return jsonResponse_(updateMealEntry(body.payload || {}));
     if (action === 'deleteMeal') return jsonResponse_(deleteMealEntry(body.payload || {}));
     if (action === 'importMeals') return jsonResponse_(importMealsBatch(body.payload || {}));
+    if (action === 'migrateMealPhotosToDiary') return jsonResponse_(migrateMealPhotosToDiary());
     if (action === 'batchSortDiaryPhotos') return jsonResponse_(batchSortDiaryPhotos(body.payload || {}));
     return jsonResponse_({ ok: false, error: 'Unknown action: ' + action });
   } catch (err) {
@@ -1158,22 +1159,12 @@ function formatMealRow_(row, r, colMap) {
     const idx = colMap && colMap[name] !== undefined ? colMap[name] : fallbackIdx;
     return idx >= 0 && idx < r.length ? r[idx] : '';
   };
-  const photoUrls = String(get('写真URL', 4) || '').split('\n').filter(Boolean);
-  let photoIds = String(get('写真ID', 5) || '').split('\n').filter(Boolean);
-  if (photoIds.length === 0 && photoUrls.length > 0) {
-    photoIds = photoUrls.map(u => {
-      const m = u.match(/\/d\/([^/]+)/);
-      return m ? m[1] : '';
-    }).filter(Boolean);
-  }
   return {
     row,
     id: get('ID', 0),
     date: formatDateVal_(get('日付', 1)),
     mealType: String(get('食事区分', 2) || '昼食'),
     dishName: String(get('料理名', 3) || ''),
-    photoUrls,
-    photoIds,
     calories: numOrEmpty_(get('カロリー(kcal)', 6)),
     protein: numOrEmpty_(get('タンパク質(g)', 7)),
     fat: numOrEmpty_(get('脂質(g)', 8)),
@@ -1259,20 +1250,14 @@ function addMealEntry(payload) {
   const idCol = (map['ID'] !== undefined ? map['ID'] : 0) + 1;
   const nextId = lastRow >= 2 ? Number(sheet.getRange(lastRow, idCol).getValue() || lastRow - 1) + 1 : 1;
 
-  const { driveUrls } = saveDiaryPhotos_(dateStr, payload.photos || []);
-  const allUrls = [...driveUrls, ...(payload.photoUrls || [])].filter(Boolean);
-  const allIds = allUrls.map(u => {
-    const m = String(u).match(/\/d\/([^/]+)/);
-    return m ? m[1] : '';
-  }).filter(Boolean);
-
+  // 食事記録への写真登録は廃止（写真は日記側へ一本化）
   const rowArr = buildMealRowByMap_(map, totalCols, {
     id: nextId,
     date: dateStr,
     mealType,
     dishName,
-    photoUrls: allUrls.join('\n'),
-    photoIds: allIds.join('\n'),
+    photoUrls: '',
+    photoIds: '',
     calories: numOrEmpty_(payload.calories),
     protein: numOrEmpty_(payload.protein),
     fat: numOrEmpty_(payload.fat),
@@ -1303,22 +1288,13 @@ function updateMealEntry(payload) {
   const mealType = payload.mealType !== undefined ? String(payload.mealType).trim() : prev.mealType;
   const dishName = payload.dishName !== undefined ? String(payload.dishName).trim() : prev.dishName;
 
-  const removeSet = new Set((payload.removeUrls || []).map(String));
-  const prevUrls = prev.photoUrls.filter(u => !removeSet.has(u));
-  const added = saveDiaryPhotos_(dateStr, payload.photos || []);
-  const allUrls = [...added.driveUrls, ...prevUrls];
-  const allIds = allUrls.map(u => {
-    const m = u.match(/\/d\/([^/]+)/);
-    return m ? m[1] : '';
-  }).filter(Boolean);
-
   const rowArr = buildMealRowByMap_(map, totalCols, {
     id: prev.id,
     date: dateStr,
     mealType,
     dishName,
-    photoUrls: allUrls.join('\n'),
-    photoIds: allIds.join('\n'),
+    photoUrls: '',
+    photoIds: '',
     calories: payload.calories !== undefined ? numOrEmpty_(payload.calories) : prev.calories,
     protein: payload.protein !== undefined ? numOrEmpty_(payload.protein) : prev.protein,
     fat: payload.fat !== undefined ? numOrEmpty_(payload.fat) : prev.fat,
@@ -1385,8 +1361,8 @@ function importMealsBatch(payload) {
       date: dateStr,
       mealType,
       dishName,
-      photoUrls: urls.join('\n'),
-      photoIds: ids.join('\n'),
+      photoUrls: '',
+      photoIds: '',
       calories: numOrEmpty_(it.calories),
       protein: numOrEmpty_(it.protein),
       fat: numOrEmpty_(it.fat),
@@ -1403,4 +1379,109 @@ function importMealsBatch(payload) {
     sheet.getRange(sheet.getLastRow() + 1, 1, rowsToAppend.length, totalCols).setValues(rowsToAppend);
   }
   return { ok: true, imported: rowsToAppend.length, skipped };
+}
+
+function migrateMealPhotosToDiary() {
+  const ss = SpreadsheetApp.openById(DIARY_SS_ID);
+  const mealSheet = ss.getSheetByName(MEAL_SHEET_NAME);
+  const diarySheet = ss.getSheetByName(DIARY_SHEET_NAME);
+  if (!mealSheet || !diarySheet) return { ok: false, error: 'Missing sheet' };
+
+  const { map: mMap, totalCols: mCols } = getMealColMap_(mealSheet);
+  const mLast = mealSheet.getLastRow();
+  if (mLast < 2) return { ok: true, migrated: 0 };
+
+  const urlIdx = mMap['写真URL'] !== undefined ? mMap['写真URL'] : 4;
+  const idIdx = mMap['写真ID'] !== undefined ? mMap['写真ID'] : 5;
+  const dateIdx = mMap['日付'] !== undefined ? mMap['日付'] : 1;
+  const mVals = mealSheet.getRange(2, 1, mLast - 1, mCols).getValues();
+
+  const migrated = [];
+  for (let i = 0; i < mVals.length; i++) {
+    const r = mVals[i];
+    const mealRow = i + 2;
+    const urls = String(r[urlIdx] || '').split('\n').filter(Boolean);
+    const ids = String(r[idIdx] || '').split('\n').filter(Boolean);
+    if (urls.length === 0 && ids.length === 0) continue;
+
+    const dateStr = formatDateVal_(r[dateIdx]);
+    const fileUrls = urls.length > 0 ? urls : ids.map(id => `https://drive.google.com/file/d/${id}/view`);
+    const fileNames = fileUrls.map(u => {
+      const m = u.match(/\/d\/([^/]+)/);
+      if (!m) return 'photo.jpg';
+      try { return DriveApp.getFileById(m[1]).getName(); } catch (e) { return `${dateStr}_${m[1]}.jpg`; }
+    });
+
+    // 日記DBで該当日を検索
+    const dLast = diarySheet.getLastRow();
+    const dDates = dLast >= 2 ? diarySheet.getRange(2, 2, dLast - 1, 1).getValues() : [];
+    let diaryRow = 0;
+    for (let j = dDates.length - 1; j >= 0; j--) {
+      if (formatDateVal_(dDates[j][0]) === dateStr) {
+        diaryRow = j + 2;
+        break;
+      }
+    }
+
+    if (diaryRow >= 2) {
+      const cur = diarySheet.getRange(diaryRow, 1, 1, 13).getValues()[0];
+      const prevNames = String(cur[8] || '').split('\n').filter(Boolean);
+      const prevUrls = String(cur[9] || '').split('\n').filter(Boolean);
+      const addNames = [];
+      const addUrls = [];
+      fileUrls.forEach((u, idx) => {
+        if (!prevUrls.includes(u)) {
+          addUrls.push(u);
+          addNames.push(fileNames[idx]);
+        }
+      });
+      const allNames = [...addNames, ...prevNames];
+      const allUrls = [...addUrls, ...prevUrls];
+      const firstIdM = (allUrls[0] || '').match(/\/d\/([^/]+)/);
+      const formula = firstIdM ? `=IMAGE("https://drive.google.com/uc?export=view&id=${firstIdM[1]}")` : '';
+      diarySheet.getRange(diaryRow, 8, 1, 4).setValues([[allNames.length, allNames.join('\n'), allUrls.join('\n'), formula]]);
+    } else {
+      const weekday = getWeekdayJa_(dateStr);
+      const nextId = dLast >= 2 ? Number(diarySheet.getRange(dLast, 1).getValue() || dLast - 1) + 1 : 1;
+      const firstIdM = (fileUrls[0] || '').match(/\/d\/([^/]+)/);
+      const formula = firstIdM ? `=IMAGE("https://drive.google.com/uc?export=view&id=${firstIdM[1]}")` : '';
+      const year = dateStr.slice(0, 4);
+      const docId = YEAR_DOC_IDS[year] || '';
+      const docUrl = docId ? `https://docs.google.com/document/d/${docId}/edit` : '';
+      diarySheet.appendRow([
+        nextId,
+        dateStr,
+        weekday,
+        Utilities.formatDate(new Date(), 'Asia/Tokyo', 'HH:mm'),
+        `${dateStr}の日記`,
+        '食事記録からの写真アーカイブ',
+        '',
+        fileNames.length,
+        fileNames.join('\n'),
+        fileUrls.join('\n'),
+        formula,
+        docUrl,
+        'meal_photo_archive',
+      ]);
+      diaryRow = diarySheet.getLastRow();
+      if (docId) {
+        try {
+          const doc = DocumentApp.openById(docId);
+          const docBody = doc.getBody();
+          docBody.appendParagraph(`${dateStr} (${weekday}) — ${dateStr}の日記`).setHeading(DocumentApp.ParagraphHeading.HEADING2);
+          docBody.appendParagraph('食事記録からの写真アーカイブ');
+          fileUrls.forEach((u, idx) => docBody.appendParagraph(`📷 写真: ${fileNames[idx]}`).setLinkUrl(u));
+          docBody.appendHorizontalRule();
+          doc.saveAndClose();
+        } catch (e) { /* ignore */ }
+      }
+    }
+
+    // 食事記録DB側の写真URL・写真IDをクリア（複製せず参照移動）
+    mealSheet.getRange(mealRow, urlIdx + 1).setValue('');
+    mealSheet.getRange(mealRow, idIdx + 1).setValue('');
+    migrated.push({ mealRow, dateStr, diaryRow, count: fileUrls.length, fileUrls });
+  }
+
+  return { ok: true, migratedCount: migrated.length, migrated };
 }
