@@ -3,6 +3,12 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+  <meta name="theme-color" content="#1a73e8">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <link rel="manifest" href="./manifest.json">
+  <link rel="apple-touch-icon" href="./apple-touch-icon.png">
+  <link rel="icon" type="image/png" href="./icon-192.png">
   <title>ライフログ・ダッシュボード</title>
   <style>
     :root {
@@ -117,6 +123,16 @@
       border-radius: 10px; font-size: 15px; font-family: inherit;
     }
     .loading { text-align: center; padding: 32px; color: var(--muted); }
+    .thumb-strip {
+      display: flex; gap: 8px; overflow-x: auto; margin-top: 10px; padding-bottom: 4px;
+    }
+    .thumb-img {
+      width: 96px; height: 96px; object-fit: cover; border-radius: 10px;
+      border: 1px solid var(--border); flex: 0 0 auto; cursor: pointer; background: #e5e7eb;
+    }
+    .lightbox-img {
+      width: 100%; max-height: 65vh; object-fit: contain; border-radius: 10px; background: #111827;
+    }
   </style>
 </head>
 <body>
@@ -204,6 +220,16 @@
     <div class="field"><label>本文 *</label><textarea id="d-body" rows="5" placeholder="出来事やメモ..."></textarea></div>
     <div class="field"><label>写真（自動で1200px以下にリサイズしてDrive保存）</label><input id="d-photos" type="file" accept="image/*" multiple></div>
     <button class="btn-big btn-diary" style="width:100%;" id="btn-save-diary" onclick="submitDiary()">日記を保存する</button>
+  </div>
+</div>
+
+<div class="modal-backdrop" id="modal-image" onclick="if(event.target===this) closeModals()">
+  <div class="modal">
+    <div class="modal-title"><span>📷 写真プレビュー</span><button class="btn-sm" onclick="closeModals()">✕</button></div>
+    <img id="preview-img" class="lightbox-img" src="" alt="プレビュー">
+    <div style="margin-top:12px;">
+      <a id="preview-drive-link" class="btn-big btn-watch" style="text-decoration:none;" target="_blank" href="#">Googleドライブで元画像を開く</a>
+    </div>
   </div>
 </div>
 
@@ -348,18 +374,35 @@ function renderDiary() {
   document.getElementById('diary-count').textContent = `表示中: ${list.length}件（直近取得${diaryData.length}件）`;
   const container = document.getElementById('diary-list');
   if (list.length === 0) { container.innerHTML = '<div class="loading">該当する日記がありません</div>'; return; }
-  container.innerHTML = list.map(d => `
+  container.innerHTML = list.map(d => {
+    const thumbs = d.thumbnails || [];
+    const urls = d.imageUrls || [];
+    const mediaHtml = thumbs.length > 0
+      ? `<div class="thumb-strip">${thumbs.map((t, i) => `<img class="thumb-img" loading="lazy" src="${esc(t)}" alt="写真${i + 1}" onclick="openImagePreview('${esc(t)}','${esc(urls[i] || t)}')">`).join('')}</div>`
+      : (urls.length > 0 ? `<div class="meta-row" style="margin-top:8px;">${urls.map((u, i) => `<a class="q-link" target="_blank" href="${esc(u)}">📷 写真${i + 1}</a>`).join('')}</div>` : '');
+    return `
     <div class="card">
       <div class="card-head"><div class="card-title">${esc(d.date)} (${esc(d.weekday)}) ${esc(d.title || '')}</div></div>
       ${d.location ? `<div class="meta-row"><span>📍 ${esc(d.location)}</span></div>` : ''}
       <div class="card-summary" style="white-space:pre-wrap;">${esc(d.body)}</div>
-      ${d.imageUrls.length > 0 ? `<div class="meta-row" style="margin-top:8px;">${d.imageUrls.map((u, i) => `<a class="q-link" target="_blank" href="${esc(u)}">📷 写真${i + 1}</a>`).join('')}</div>` : ''}
-    </div>`).join('');
+      ${mediaHtml}
+    </div>`;
+  }).join('');
+}
+
+function openImagePreview(thumbUrl, driveUrl) {
+  document.getElementById('preview-img').src = thumbUrl.replace('&sz=w400', '&sz=w1200');
+  document.getElementById('preview-drive-link').href = driveUrl;
+  document.getElementById('modal-image').classList.add('open');
 }
 
 function openWatchModal() { document.getElementById('modal-watch').classList.add('open'); }
 function openDiaryModal() { document.getElementById('modal-diary').classList.add('open'); }
-function closeModals() { document.getElementById('modal-watch').classList.remove('open'); document.getElementById('modal-diary').classList.remove('open'); }
+function closeModals() {
+  document.getElementById('modal-watch').classList.remove('open');
+  document.getElementById('modal-diary').classList.remove('open');
+  document.getElementById('modal-image').classList.remove('open');
+}
 
 async function submitWatch() {
   const title = document.getElementById('w-title').value.trim();

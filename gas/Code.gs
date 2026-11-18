@@ -419,6 +419,11 @@ function getDiaryEntries(limit) {
   const out = [];
   for (let i = values.length - 1; i >= 0; i--) {
     const r = values[i];
+    const imageUrls = String(r[9] || '').split('\n').filter(Boolean);
+    const thumbnails = imageUrls.map(u => {
+      const m = u.match(/\/d\/([^/]+)/);
+      return m ? `https://drive.google.com/thumbnail?id=${m[1]}&sz=w400` : '';
+    }).filter(Boolean);
     out.push({
       id: r[0],
       date: formatDateVal_(r[1]),
@@ -427,7 +432,8 @@ function getDiaryEntries(limit) {
       body: String(r[5] || ''),
       location: String(r[6] || ''),
       imageCount: Number(r[7] || 0),
-      imageUrls: String(r[9] || '').split('\n').filter(Boolean),
+      imageUrls,
+      thumbnails,
     });
   }
   return out;
