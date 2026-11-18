@@ -135,35 +135,51 @@ function normalizeAllPlatforms() {
 }
 
 function enrichRow_(sheet, row) {
-  const rawTitle = String(sheet.getRange(row, COL.TITLE).getValue() || '').trim();
+  const cur = sheet.getRange(row, 1, 1, 15).getValues()[0];
+  const rawTitle = String(cur[COL.TITLE - 1] || '').trim();
   if (!rawTitle) return;
 
   const cleanTitle = rawTitle
     .replace(/^(?:\[.*?\]|【.*?】|ドラマ|映画|アニメ|小説|漫画)[『「\s]*(.*?)[』」\s]*$/, '$1')
     .trim();
 
+  const curSummary = String(cur[COL.SUMMARY - 1] || '').trim();
   const wiki = fetchWikipediaInfo_(cleanTitle || rawTitle);
   if (!wiki) {
-    sheet.getRange(row, COL.SUMMARY).setValue('⚠️ Wikipedia記事が見つかりませんでした');
+    if (!curSummary) {
+      sheet.getRange(row, COL.SUMMARY).setValue('⚠️ Wikipedia記事が見つかりませんでした');
+    }
     return;
   }
 
-  if (wiki.year && !sheet.getRange(row, COL.RELEASE_YEAR).getValue()) {
+  if (wiki.year && !cur[COL.RELEASE_YEAR - 1]) {
     sheet.getRange(row, COL.RELEASE_YEAR).setValue(wiki.year);
   }
   if (wiki.platforms.length > 0) {
-    const curPlat = String(sheet.getRange(row, COL.PLATFORM).getValue() || '');
-    const memo = String(sheet.getRange(row, COL.MEMO).getValue() || '');
+    const curPlat = String(cur[COL.PLATFORM - 1] || '');
+    const memo = String(cur[COL.MEMO - 1] || '');
     const merged = [curPlat, ...wiki.platforms].filter(Boolean).join(', ');
     sheet.getRange(row, COL.PLATFORM).setValue(normalizePlatforms_(merged, `${rawTitle} ${memo}`));
   }
   if (wiki.cast.length > 0) {
-    sheet.getRange(row, COL.CAST).setValue(wiki.cast.slice(0, MAX_CAST).join(', '));
+    const curCast = String(cur[COL.CAST - 1] || '')
+      .split(/[,、]/)
+      .map(s => s.trim())
+      .filter(Boolean);
+    const mergedCast = [...curCast];
+    wiki.cast.forEach(c => { if (c && !mergedCast.includes(c)) mergedCast.push(c); });
+    sheet.getRange(row, COL.CAST).setValue(mergedCast.slice(0, MAX_CAST).join(', '));
   }
   if (wiki.staff.length > 0) {
-    sheet.getRange(row, COL.STAFF).setValue(wiki.staff.join(', '));
+    const curStaff = String(cur[COL.STAFF - 1] || '')
+      .split(/[,、]/)
+      .map(s => s.trim())
+      .filter(Boolean);
+    const mergedStaff = [...curStaff];
+    wiki.staff.forEach(s => { if (s && !mergedStaff.includes(s)) mergedStaff.push(s); });
+    sheet.getRange(row, COL.STAFF).setValue(mergedStaff.join(', '));
   }
-  if (wiki.summary) {
+  if (wiki.summary && (!curSummary || curSummary.startsWith('⚠️ Wikipedia記事が見つかりませんでした'))) {
     sheet.getRange(row, COL.SUMMARY).setValue(wiki.summary);
   }
 }
@@ -208,7 +224,7 @@ function fetchWikipediaInfo_(title) {
 
   const exact = results.find(r => r.title === title);
   const pageTitle = exact ? exact.title : results[0].title;
-  const contentUrl = `${apiBase}?action=query&prop=revisions|extracts&rvprop=content&exintro=1&explaintext=1&titles=${encodeURIComponent(pageTitle)}&format=json`;
+  const contentUrl = `${apiBase}?action=query&prop=revisions%7Cextracts&rvprop=content&exintro=1&explaintext=1&titles=${encodeURIComponent(pageTitle)}&format=json`;
   const cRes = UrlFetchApp.fetch(contentUrl, { headers, muteHttpExceptions: true });
   if (cRes.getResponseCode() !== 200) return null;
 
@@ -440,7 +456,7 @@ function updateWatchCard(payload) {
   const ss = SpreadsheetApp.openById(WATCH_SS_ID);
   const sheet = ss.getSheetByName(SHEET_NAME);
   const row = resolveRowByIdOrIndex_(sheet, COL.ID, payload.row, payload.id);
-  if (row < 2) throw new Error('Watch entry not found');
+  if (row < 2) return { ok: false, error: 'Watch entry not found' };
 
   if (payload.status !== undefined) {
     sheet.getRange(row, COL.STATUS).setValue(payload.status);
@@ -455,7 +471,7 @@ function updateWatchCard(payload) {
     enrichRow_(sheet, row);
   }
   const r = sheet.getRange(row, 1, 1, 15).getValues()[0];
-  return formatWatchRow_(row, r);
+  return Object.assign({ ok: true }, formatWatchRow_(row, r));
 }
 
 function updateWatchFull(payload) {

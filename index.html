@@ -9,7 +9,7 @@
   <link rel="manifest" href="./manifest.json">
   <link rel="apple-touch-icon" href="./apple-touch-icon.png">
   <link rel="icon" type="image/png" href="./icon-192.png">
-  <title>ライフログ・ダッシュボード v1.14.0</title>
+  <title>ライフログ・ダッシュボード v1.14.1</title>
   <style>
     :root {
       --bg: #f4f6f9;
@@ -261,7 +261,7 @@
   <div class="header-top">
     <h1 class="app-title">📚 ライフログ・ダッシュボード</h1>
     <div class="header-right">
-      <span class="ver-badge" id="app-version">v1.14.0</span>
+      <span class="ver-badge" id="app-version">v1.14.1</span>
       <button class="btn-sm" id="btn-check-update" onclick="manualCheckUpdate()" title="最新バージョン確認・更新">🔄 更新</button>
     </div>
   </div>
@@ -492,7 +492,7 @@
 </div>
 
 <script>
-const APP_VERSION = 'v1.14.0';
+const APP_VERSION = 'v1.14.1';
 const GAS_API_URL = 'https://script.google.com/macros/s/AKfycbxLecFd_9FWeR-2w2ThU5SYS7es-0IVKODoLWYgDJGfsoiQzsSRF9IFMAhtZTPl17CDKw/exec';
 
 let watchData = [];
@@ -729,10 +729,40 @@ function renderWatch() {
 async function quickUpdate(row, changes) {
   const card = document.getElementById(`wcard-${row}`);
   if (card) card.style.opacity = '0.5';
-  const updated = await apiPost('updateWatch', { row, ...changes });
   const idx = watchData.findIndex(x => x.row === row);
-  if (idx >= 0) watchData[idx] = updated;
-  renderWatch();
+  const existing = idx >= 0 ? watchData[idx] : null;
+  try {
+    const updated = await apiPost('updateWatch', {
+      row,
+      id: existing ? existing.id : undefined,
+      ...changes
+    });
+    if (!updated || updated.ok === false || !updated.title) {
+      showToast('更新に失敗しました: ' + ((updated && updated.error) || '通信エラー'), true);
+      if (card) card.style.opacity = '1';
+      return;
+    }
+    if (idx >= 0) {
+      watchData[idx] = {
+        ...existing,
+        ...updated,
+        status: updated.status || existing.status,
+        title: updated.title || existing.title,
+        memo: updated.memo !== undefined ? updated.memo : existing.memo,
+        watchDate: updated.watchDate !== undefined ? updated.watchDate : existing.watchDate,
+        rating: updated.rating !== undefined ? updated.rating : existing.rating,
+        relatedUrl: updated.relatedUrl !== undefined ? updated.relatedUrl : existing.relatedUrl,
+        notionUrl: updated.notionUrl !== undefined ? updated.notionUrl : existing.notionUrl,
+      };
+    }
+    renderWatch();
+    if (changes.runWiki) {
+      showToast('Wikipedia情報を補完しました');
+    }
+  } catch (err) {
+    showToast('更新に失敗しました: ' + err.message, true);
+    if (card) card.style.opacity = '1';
+  }
 }
 
 const thumbMemCache = {};
