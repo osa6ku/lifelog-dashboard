@@ -993,10 +993,7 @@ function syncDiaryDocUpdate_(oldDate, oldTitle, newDate, newWeekday, newTitle, n
     }
   }
 
-  for (let i = removeIndices.length - 1; i >= 0; i--) {
-    docBody.removeChild(docBody.getChild(removeIndices[i]));
-  }
-
+  // 先に新しい段落を挿入してから古い段落を削除する（「最終段落は削除できません」エラー回避）
   let insertAt = headingIdx + 1;
   if (newLocation) {
     docBody.insertParagraph(insertAt, `📍 場所: ${newLocation.split('\n').join(' → ')}`);
@@ -1004,6 +1001,16 @@ function syncDiaryDocUpdate_(oldDate, oldTitle, newDate, newWeekday, newTitle, n
   }
   if (newBody) {
     docBody.insertParagraph(insertAt, newBody);
+    insertAt++;
+  }
+  const insertedCount = insertAt - (headingIdx + 1);
+  for (let i = removeIndices.length - 1; i >= 0; i--) {
+    const child = docBody.getChild(removeIndices[i] + insertedCount);
+    try {
+      docBody.removeChild(child);
+    } catch (e) {
+      if (child.getType() === DocumentApp.ElementType.PARAGRAPH) child.asParagraph().setText('');
+    }
   }
   doc.saveAndClose();
   return true;
