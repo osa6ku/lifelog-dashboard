@@ -9,7 +9,7 @@
   <link rel="manifest" href="./manifest.json">
   <link rel="apple-touch-icon" href="./apple-touch-icon.png">
   <link rel="icon" type="image/png" href="./icon-192.png">
-  <title>ライフログ・ダッシュボード v1.10.0</title>
+  <title>ライフログ・ダッシュボード v1.11.0</title>
   <style>
     :root {
       --bg: #f4f6f9;
@@ -237,6 +237,20 @@
     .mt-昼 { background: #dcfce7; color: #15803d; }
     .mt-夕 { background: #dbeafe; color: #1d4ed8; }
     .mt-間 { background: #f3e8ff; color: #7e22ce; }
+    .toast-box {
+      display: none; position: fixed; bottom: 72px; left: 50%; transform: translateX(-50%);
+      z-index: 90; width: calc(100% - 24px); max-width: 560px;
+      background: #1f2937; color: #fff; padding: 10px 14px; border-radius: 12px;
+      font-size: 13px; font-weight: 600; box-shadow: 0 6px 20px rgba(0,0,0,0.22);
+      align-items: center; justify-content: space-between; gap: 10px;
+    }
+    .toast-box.show { display: flex; }
+    .toast-box.error { background: #b91c1c; }
+    .toast-box.success { background: #047857; }
+    .toast-retry {
+      border: 1px solid rgba(255,255,255,0.6); background: rgba(255,255,255,0.15);
+      color: #fff; border-radius: 8px; padding: 4px 10px; font-size: 12px; font-weight: 700; cursor: pointer; white-space: nowrap;
+    }
   </style>
 </head>
 <body>
@@ -244,7 +258,7 @@
   <div class="header-top">
     <h1 class="app-title">📚 ライフログ・ダッシュボード</h1>
     <div class="header-right">
-      <span class="ver-badge" id="app-version">v1.10.0</span>
+      <span class="ver-badge" id="app-version">v1.11.0</span>
       <button class="btn-sm" id="btn-check-update" onclick="manualCheckUpdate()" title="最新バージョン確認・更新">🔄 更新</button>
     </div>
   </div>
@@ -469,8 +483,13 @@
   </div>
 </div>
 
+<div id="toast-box" class="toast-box">
+  <span id="toast-msg"></span>
+  <button id="toast-retry" class="toast-retry" style="display:none;">再試行</button>
+</div>
+
 <script>
-const APP_VERSION = 'v1.10.0';
+const APP_VERSION = 'v1.11.0';
 const GAS_API_URL = 'https://script.google.com/macros/s/AKfycbxLecFd_9FWeR-2w2ThU5SYS7es-0IVKODoLWYgDJGfsoiQzsSRF9IFMAhtZTPl17CDKw/exec';
 
 let watchData = [];
@@ -556,6 +575,26 @@ function switchTab(tab) {
       mealData.length === 0 ? loadMealsData(false) : Promise.resolve(),
       diaryData.length === 0 ? loadDiaryData(false) : Promise.resolve(),
     ]).then(() => renderNutritionView());
+  }
+}
+
+let toastTimer = null;
+function showToast(msg, type = 'info', retryFn = null, durationMs = 3500) {
+  const box = document.getElementById('toast-box');
+  const msgEl = document.getElementById('toast-msg');
+  const retryBtn = document.getElementById('toast-retry');
+  if (toastTimer) { clearTimeout(toastTimer); toastTimer = null; }
+  box.className = `toast-box show ${type}`;
+  msgEl.textContent = msg;
+  if (retryFn) {
+    retryBtn.style.display = 'inline-block';
+    retryBtn.onclick = () => { box.classList.remove('show'); retryFn(); };
+  } else {
+    retryBtn.style.display = 'none';
+    retryBtn.onclick = null;
+  }
+  if (durationMs > 0) {
+    toastTimer = setTimeout(() => box.classList.remove('show'), durationMs);
   }
 }
 
@@ -1333,61 +1372,117 @@ async function estimateMealModal() {
   }
 }
 
+function sortMealsList(arr) {
+  return arr.sort((a, b) => {
+    if (a.date !== b.date) return b.date.localeCompare(a.date);
+    return (MEAL_ORDER[a.mealType] || 9) - (MEAL_ORDER[b.mealType] || 9) || Number(a.id || 0) - Number(b.id || 0);
+  });
+}
+
 async function submitMeal() {
   const dishName = document.getElementById('m-dish').value.trim();
   if (!dishName) { alert('料理名を入力してください'); return; }
-  const btn = document.getElementById('btn-save-meal');
+
   const isEdit = Boolean(editingMeal);
-  const origLabel = isEdit ? '変更を保存する' : '食事を保存する';
-  btn.disabled = true; btn.textContent = '保存中...';
-  try {
-    const payload = {
-      date: document.getElementById('m-date').value,
-      mealType: document.getElementById('m-type').value,
-      dishName,
-      calories: document.getElementById('m-cal').value,
-      protein: document.getElementById('m-p').value,
-      fat: document.getElementById('m-f').value,
-      carbs: document.getElementById('m-c').value,
-      sugar: document.getElementById('m-sugar').value,
-      fiber: document.getElementById('m-fiber').value,
-      salt: document.getElementById('m-salt').value,
-      memo: document.getElementById('m-memo').value,
-    };
-    if (isEdit) {
-      payload.row = editingMeal.row;
-      payload.id = editingMeal.id;
-      const res = await apiPost('updateMeal', payload);
-      if (!res || !res.ok) throw new Error((res && res.error) || '更新に失敗しました');
-    } else {
-      const res = await apiPost('addMeal', payload);
-      if (!res || !res.ok) throw new Error((res && res.error) || '保存に失敗しました');
-    }
-    editingMeal = null;
-    closeModals();
-    await loadMealsData(true);
-  } catch (err) {
-    alert(`食事記録の保存エラー:\n${err.message || err}`);
-  } finally {
-    btn.disabled = false; btn.textContent = origLabel;
+  const targetMeal = editingMeal;
+  const payload = {
+    date: document.getElementById('m-date').value,
+    mealType: document.getElementById('m-type').value,
+    dishName,
+    calories: document.getElementById('m-cal').value,
+    protein: document.getElementById('m-p').value,
+    fat: document.getElementById('m-f').value,
+    carbs: document.getElementById('m-c').value,
+    sugar: document.getElementById('m-sugar').value,
+    fiber: document.getElementById('m-fiber').value,
+    salt: document.getElementById('m-salt').value,
+    memo: document.getElementById('m-memo').value,
+  };
+  if (isEdit) {
+    payload.row = targetMeal.row;
+    payload.id = targetMeal.id;
   }
+
+  // 楽観的更新：即座にモーダルを閉じて画面へ仮反映
+  const snapshot = mealData.map(x => ({ ...x }));
+  const tempKey = isEdit ? targetMeal.id : `temp-${Date.now()}`;
+  const optimisticItem = {
+    row: isEdit ? targetMeal.row : 0,
+    id: tempKey,
+    date: payload.date,
+    mealType: payload.mealType,
+    dishName: payload.dishName,
+    calories: payload.calories !== '' ? Number(payload.calories) : '',
+    protein: payload.protein !== '' ? Number(payload.protein) : '',
+    fat: payload.fat !== '' ? Number(payload.fat) : '',
+    carbs: payload.carbs !== '' ? Number(payload.carbs) : '',
+    sugar: payload.sugar !== '' ? Number(payload.sugar) : '',
+    fiber: payload.fiber !== '' ? Number(payload.fiber) : '',
+    salt: payload.salt !== '' ? Number(payload.salt) : '',
+    memo: payload.memo,
+    source: isEdit ? targetMeal.source : 'webapp',
+  };
+  if (isEdit) {
+    const idx = mealData.findIndex(x => (targetMeal.row && x.row === targetMeal.row) || String(x.id) === String(targetMeal.id));
+    if (idx >= 0) mealData[idx] = optimisticItem;
+  } else {
+    mealData.push(optimisticItem);
+  }
+  sortMealsList(mealData);
+  editingMeal = null;
+  closeModals();
+  renderNutritionView();
+  if (diaryData.length > 0) renderDiary();
+  showToast('食事記録を保存中...', 'info', null, 0);
+
+  const sendMeal = async () => {
+    try {
+      const res = await apiPost(isEdit ? 'updateMeal' : 'addMeal', payload);
+      if (!res || !res.ok || !res.entry) throw new Error((res && res.error) || '保存に失敗しました');
+      const idx = mealData.findIndex(x => String(x.id) === String(tempKey) || (res.entry.row && x.row === res.entry.row));
+      if (idx >= 0) mealData[idx] = res.entry;
+      else mealData.push(res.entry);
+      sortMealsList(mealData);
+      renderNutritionView();
+      if (diaryData.length > 0) renderDiary();
+      showToast('食事記録を保存しました', 'success', null, 2200);
+    } catch (err) {
+      mealData = snapshot;
+      renderNutritionView();
+      if (diaryData.length > 0) renderDiary();
+      showToast(`食事保存失敗（元に戻しました）: ${err.message || err}`, 'error', () => {
+        mealData = isEdit
+          ? snapshot.map(x => ((targetMeal.row && x.row === targetMeal.row) || String(x.id) === String(targetMeal.id)) ? optimisticItem : x)
+          : sortMealsList([...snapshot, optimisticItem]);
+        renderNutritionView();
+        sendMeal();
+      }, 0);
+    }
+  };
+  sendMeal();
 }
 
 async function deleteCurrentMeal() {
   if (!editingMeal) return;
   if (!confirm(`「${editingMeal.date} ${editingMeal.mealType}: ${editingMeal.dishName}」を削除しますか？`)) return;
-  const btn = document.getElementById('btn-delete-meal');
-  btn.disabled = true; btn.textContent = '削除中...';
+  const target = editingMeal;
+  const snapshot = mealData.map(x => ({ ...x }));
+  mealData = mealData.filter(x => !(target.row && x.row === target.row) && String(x.id) !== String(target.id));
+  editingMeal = null;
+  closeModals();
+  renderNutritionView();
+  if (diaryData.length > 0) renderDiary();
+  showToast('食事記録を削除中...', 'info', null, 0);
+
   try {
-    const res = await apiPost('deleteMeal', { row: editingMeal.row, id: editingMeal.id });
+    const res = await apiPost('deleteMeal', { row: target.row, id: target.id });
     if (!res || !res.ok) throw new Error((res && res.error) || '削除に失敗しました');
-    editingMeal = null;
-    closeModals();
-    await loadMealsData(true);
+    showToast('食事記録を削除しました', 'success', null, 2200);
   } catch (err) {
-    alert(`削除エラー: ${err.message || err}`);
-  } finally {
-    btn.disabled = false; btn.textContent = '🗑️ この食事記録を削除';
+    mealData = snapshot;
+    renderNutritionView();
+    if (diaryData.length > 0) renderDiary();
+    showToast(`削除失敗（元に戻しました）: ${err.message || err}`, 'error', null, 5000);
   }
 }
 
@@ -1662,69 +1757,106 @@ async function searchLocationByKeyword() {
 async function submitWatch() {
   const title = document.getElementById('w-title').value.trim();
   if (!title) { alert('タイトルを入力してください'); return; }
-  const btn = document.getElementById('btn-save-watch');
+
   const isEdit = Boolean(editingWatch);
-  const origLabel = isEdit ? '変更を保存する' : '保存する';
-  btn.disabled = true; btn.textContent = isEdit ? '更新中...' : '保存中...';
-
-  try {
-    const payload = {
-      title,
-      category: document.getElementById('w-cat').value,
-      platform: document.getElementById('w-plat').value,
-      status: document.getElementById('w-status').value,
-      rating: document.getElementById('w-rating').value,
-      watchDate: document.getElementById('w-date').value,
-      memo: document.getElementById('w-memo').value,
-      releaseYear: document.getElementById('w-year').value,
-      cast: document.getElementById('w-cast').value,
-      staff: document.getElementById('w-staff').value,
-      summary: document.getElementById('w-summary').value,
-      relatedUrl: document.getElementById('w-url').value,
-    };
-
-    if (isEdit) {
-      payload.row = editingWatch.row;
-      payload.id = editingWatch.id;
-      payload.runWiki = document.getElementById('w-wiki').checked;
-      const res = await apiPost('updateWatchFull', payload);
-      if (!res || !res.ok) throw new Error((res && res.error) || '更新に失敗しました');
-      if (res.entry) {
-        const idx = watchData.findIndex(x => x.row === res.entry.row || String(x.id) === String(res.entry.id));
-        if (idx >= 0) watchData[idx] = res.entry;
-      }
-      editingWatch = null;
-      closeModals();
-      renderWatch();
-    } else {
-      payload.autoWiki = document.getElementById('w-wiki').checked;
-      const res = await apiPost('addWatch', payload);
-      if (!res || !res.ok) throw new Error((res && res.error) || '保存に失敗しました');
-      closeModals();
-      loadWatchData();
-    }
-  } catch (err) {
-    alert(`鑑賞記録の保存中にエラーが発生しました:\n${err.message || err}`);
-  } finally {
-    btn.disabled = false;
-    btn.textContent = origLabel;
+  const targetWatch = editingWatch;
+  const payload = {
+    title,
+    category: document.getElementById('w-cat').value,
+    platform: document.getElementById('w-plat').value,
+    status: document.getElementById('w-status').value,
+    rating: document.getElementById('w-rating').value,
+    watchDate: document.getElementById('w-date').value,
+    memo: document.getElementById('w-memo').value,
+    releaseYear: document.getElementById('w-year').value,
+    cast: document.getElementById('w-cast').value,
+    staff: document.getElementById('w-staff').value,
+    summary: document.getElementById('w-summary').value,
+    relatedUrl: document.getElementById('w-url').value,
+  };
+  if (isEdit) {
+    payload.row = targetWatch.row;
+    payload.id = targetWatch.id;
+    payload.runWiki = document.getElementById('w-wiki').checked;
+  } else {
+    payload.autoWiki = document.getElementById('w-wiki').checked;
   }
+
+  // 楽観的更新：即座にモーダルを閉じて画面へ仮反映
+  const snapshot = watchData.map(x => ({ ...x }));
+  const tempKey = isEdit ? targetWatch.id : `temp-${Date.now()}`;
+  const optimisticItem = {
+    row: isEdit ? targetWatch.row : 0,
+    id: tempKey,
+    title: payload.title,
+    category: payload.category,
+    watchDate: payload.watchDate,
+    status: payload.status,
+    rating: payload.rating,
+    platform: payload.platform,
+    releaseYear: payload.releaseYear,
+    cast: payload.cast,
+    staff: payload.staff,
+    summary: payload.summary,
+    memo: payload.memo,
+    relatedUrl: payload.relatedUrl,
+    notionUrl: isEdit ? (targetWatch.notionUrl || '') : '',
+  };
+  if (isEdit) {
+    const idx = watchData.findIndex(x => x.row === targetWatch.row || String(x.id) === String(targetWatch.id));
+    if (idx >= 0) watchData[idx] = optimisticItem;
+  } else {
+    watchData.unshift(optimisticItem);
+  }
+  editingWatch = null;
+  closeModals();
+  renderWatch();
+  showToast('鑑賞記録を保存中...', 'info', null, 0);
+
+  const sendWatch = async () => {
+    try {
+      const res = await apiPost(isEdit ? 'updateWatchFull' : 'addWatch', payload);
+      if (!res || !res.ok || !res.entry) throw new Error((res && res.error) || '保存に失敗しました');
+      const idx = watchData.findIndex(x => String(x.id) === String(tempKey) || (res.entry.row && x.row === res.entry.row));
+      if (idx >= 0) watchData[idx] = res.entry;
+      else watchData.unshift(res.entry);
+      renderWatch();
+      showToast('鑑賞記録を保存しました', 'success', null, 2200);
+    } catch (err) {
+      watchData = snapshot;
+      renderWatch();
+      showToast(`鑑賞記録の保存失敗（元に戻しました）: ${err.message || err}`, 'error', () => {
+        watchData = isEdit
+          ? snapshot.map(x => (x.row === targetWatch.row || String(x.id) === String(targetWatch.id)) ? optimisticItem : x)
+          : [optimisticItem, ...snapshot];
+        renderWatch();
+        sendWatch();
+      }, 0);
+    }
+  };
+  sendWatch();
 }
 
 async function deleteCurrentWatch() {
   if (!editingWatch) return;
   if (!confirm(`「${editingWatch.title}」を削除しますか？（元に戻せません）`)) return;
-  const btn = document.getElementById('btn-delete-watch');
-  btn.disabled = true; btn.textContent = '削除中...';
-  const res = await apiPost('deleteWatch', { row: editingWatch.row, id: editingWatch.id });
-  btn.disabled = false; btn.textContent = '🗑️ この鑑賞記録を削除';
-  if (!res || !res.ok) {
-    alert('削除に失敗しました: ' + ((res && res.error) || 'Unknown error'));
-    return;
-  }
+  const target = editingWatch;
+  const snapshot = watchData.map(x => ({ ...x }));
+  watchData = watchData.filter(x => !(target.row && x.row === target.row) && String(x.id) !== String(target.id));
   editingWatch = null;
   closeModals();
-  loadWatchData();
+  renderWatch();
+  showToast('鑑賞記録を削除中...', 'info', null, 0);
+
+  try {
+    const res = await apiPost('deleteWatch', { row: target.row, id: target.id });
+    if (!res || !res.ok) throw new Error((res && res.error) || '削除に失敗しました');
+    showToast('鑑賞記録を削除しました', 'success', null, 2200);
+  } catch (err) {
+    watchData = snapshot;
+    renderWatch();
+    showToast(`削除失敗（元に戻しました）: ${err.message || err}`, 'error', null, 5000);
+  }
 }
 
 async function analyzeMealInModal() {
@@ -1799,12 +1931,13 @@ async function submitDiary() {
 
   const btn = document.getElementById('btn-save-diary');
   const isEdit = Boolean(editingDiary);
+  const targetDiary = editingDiary;
   const origLabel = isEdit ? '変更を保存する' : '日記を保存する';
-  btn.disabled = true; btn.textContent = isEdit ? '更新中...' : '保存中...';
+  btn.disabled = true; btn.textContent = '準備中...';
 
+  let photos = [];
   try {
     const files = Array.from(document.getElementById('d-photos').files || []);
-    const photos = [];
     const skippedFiles = [];
     for (const f of files) {
       try {
@@ -1818,73 +1951,127 @@ async function submitDiary() {
       const okToProceed = confirm(`以下の写真はブラウザで変換できなかったためスキップされます（HEIC非対応環境など）:\n${skippedFiles.join(', ')}\n\nこのまま本文・位置情報を保存しますか？`);
       if (!okToProceed) return;
     }
-    // 撮影/更新日時の新しい順（降順）にソート
     photos.sort((a, b) => (b.ts || 0) - (a.ts || 0));
-
-    btn.textContent = isEdit ? '更新送信中...' : 'サーバーへ送信中...';
-    const payload = {
-      date: document.getElementById('d-date').value,
-      title: document.getElementById('d-title').value,
-      location: diaryLocations.map(l => l.name).join('\n'),
-      locations: diaryLocations,
-      body,
-      photos,
-      mealType: document.getElementById('d-meal-type').value,
-      calories: document.getElementById('d-cal').value,
-      protein: document.getElementById('d-p').value,
-      fat: document.getElementById('d-f').value,
-      carbs: document.getElementById('d-c').value,
-      nutritionAdvice: document.getElementById('d-nut-advice').value,
-    };
-    saveLocationToHistory(diaryLocations);
-
-    if (isEdit) {
-      payload.row = editingDiary.row;
-      payload.id = editingDiary.id;
-      payload.removeUrls = Array.from(removedPhotoUrls);
-      const res = await apiPost('updateDiary', payload);
-      if (!res || !res.ok) throw new Error((res && res.error) || '更新に失敗しました');
-      if (res.entry) {
-        const idx = diaryData.findIndex(x => (res.entry.row && x.row === res.entry.row) || String(x.id) === String(res.entry.id));
-        if (idx >= 0) diaryData[idx] = res.entry;
-      }
-      editingDiary = null;
-      closeModals();
-      renderDiary();
-      if (document.getElementById('view-nutrition').style.display !== 'none') renderNutritionView();
-    } else {
-      const res = await apiPost('addDiary', payload);
-      if (!res || !res.ok) throw new Error((res && res.error) || '保存に失敗しました');
-      if (res.failedPhotos && res.failedPhotos.length > 0) {
-        alert(`日記は保存されましたが、以下の写真アップロードに失敗しました:\n${res.failedPhotos.join(', ')}`);
-      }
-      closeModals();
-      switchTab('diary');
-      await loadDiaryData();
-    }
-  } catch (err) {
-    const msg = err && err.message ? err.message : String(err);
-    alert(`送信処理でエラーまたは応答タイムアウトが発生しました。\n詳細: ${msg}\n\n※GAS側の仕様によりサーバー上では保存が完了している場合があります。タイムラインを再読み込みしてご確認ください。`);
   } finally {
     btn.disabled = false;
     btn.textContent = origLabel;
   }
+
+  const dateVal = document.getElementById('d-date').value;
+  const titleVal = document.getElementById('d-title').value;
+  const locsCopy = diaryLocations.map(l => ({ ...l }));
+  const payload = {
+    date: dateVal,
+    title: titleVal,
+    location: locsCopy.map(l => l.name).join('\n'),
+    locations: locsCopy,
+    body,
+    photos,
+    mealType: document.getElementById('d-meal-type').value,
+    calories: document.getElementById('d-cal').value,
+    protein: document.getElementById('d-p').value,
+    fat: document.getElementById('d-f').value,
+    carbs: document.getElementById('d-c').value,
+    nutritionAdvice: document.getElementById('d-nut-advice').value,
+  };
+  saveLocationToHistory(locsCopy);
+  if (isEdit) {
+    payload.row = targetDiary.row;
+    payload.id = targetDiary.id;
+    payload.removeUrls = Array.from(removedPhotoUrls);
+  }
+
+  // 楽観的更新：即座にモーダルを閉じてタイムラインへ仮反映
+  const weekdays = ['日', '月', '火', '水', '木', '金', '土'];
+  const wd = weekdays[new Date(`${dateVal}T00:00:00+09:00`).getDay()] || '';
+  const snapshot = diaryData.map(x => ({ ...x }));
+  const tempKey = isEdit ? targetDiary.id : `temp-${Date.now()}`;
+  const optimisticItem = {
+    row: isEdit ? targetDiary.row : 0,
+    id: tempKey,
+    date: dateVal,
+    weekday: wd,
+    title: titleVal,
+    body,
+    location: payload.location,
+    locations: locsCopy,
+    imageCount: isEdit ? (targetDiary.imageCount || 0) + photos.length : photos.length,
+    imageUrls: isEdit ? (targetDiary.imageUrls || []) : [],
+    imageIds: isEdit ? (targetDiary.imageIds || []) : [],
+    mealType: payload.mealType,
+    calories: payload.calories !== '' ? Number(payload.calories) : '',
+    protein: payload.protein !== '' ? Number(payload.protein) : '',
+    fat: payload.fat !== '' ? Number(payload.fat) : '',
+    carbs: payload.carbs !== '' ? Number(payload.carbs) : '',
+    nutritionAdvice: payload.nutritionAdvice,
+  };
+
+  if (isEdit) {
+    const idx = diaryData.findIndex(x => (targetDiary.row && x.row === targetDiary.row) || String(x.id) === String(targetDiary.id));
+    if (idx >= 0) diaryData[idx] = optimisticItem;
+  } else {
+    diaryData.unshift(optimisticItem);
+    switchTab('diary');
+  }
+  editingDiary = null;
+  closeModals();
+  renderDiary();
+  if (document.getElementById('view-nutrition').style.display !== 'none') renderNutritionView();
+  showToast('日記を保存中...', 'info', null, 0);
+
+  const sendDiary = async () => {
+    try {
+      const res = await apiPost(isEdit ? 'updateDiary' : 'addDiary', payload);
+      if (!res || !res.ok) throw new Error((res && res.error) || '保存に失敗しました');
+      if (res.failedPhotos && res.failedPhotos.length > 0) {
+        alert(`日記は保存されましたが、以下の写真アップロードに失敗しました:\n${res.failedPhotos.join(', ')}`);
+      }
+      if (res.entry) {
+        const idx = diaryData.findIndex(x => String(x.id) === String(tempKey) || (res.entry.row && x.row === res.entry.row));
+        if (idx >= 0) diaryData[idx] = res.entry;
+        else diaryData.unshift(res.entry);
+        renderDiary();
+        if (document.getElementById('view-nutrition').style.display !== 'none') renderNutritionView();
+      }
+      showToast('日記を保存しました', 'success', null, 2200);
+    } catch (err) {
+      diaryData = snapshot;
+      renderDiary();
+      if (document.getElementById('view-nutrition').style.display !== 'none') renderNutritionView();
+      showToast(`日記の保存失敗（元に戻しました）: ${err.message || err}`, 'error', () => {
+        diaryData = isEdit
+          ? snapshot.map(x => ((targetDiary.row && x.row === targetDiary.row) || String(x.id) === String(targetDiary.id)) ? optimisticItem : x)
+          : [optimisticItem, ...snapshot];
+        renderDiary();
+        sendDiary();
+      }, 0);
+    }
+  };
+  sendDiary();
 }
 
 async function deleteCurrentDiary() {
   if (!editingDiary) return;
   if (!confirm(`「${editingDiary.date} ${editingDiary.title || '(無題)'}」を削除しますか？（元に戻せません）`)) return;
-  const btn = document.getElementById('btn-delete-diary');
-  btn.disabled = true; btn.textContent = '削除中...';
-  const res = await apiPost('deleteDiary', { row: editingDiary.row, id: editingDiary.id });
-  btn.disabled = false; btn.textContent = '🗑️ この日記を削除';
-  if (!res || !res.ok) {
-    alert('削除に失敗しました: ' + ((res && res.error) || 'Unknown error'));
-    return;
-  }
+  const target = editingDiary;
+  const snapshot = diaryData.map(x => ({ ...x }));
+  diaryData = diaryData.filter(x => !(target.row && x.row === target.row) && String(x.id) !== String(target.id));
   editingDiary = null;
   closeModals();
-  loadDiaryData();
+  renderDiary();
+  if (document.getElementById('view-nutrition').style.display !== 'none') renderNutritionView();
+  showToast('日記を削除中...', 'info', null, 0);
+
+  try {
+    const res = await apiPost('deleteDiary', { row: target.row, id: target.id });
+    if (!res || !res.ok) throw new Error((res && res.error) || '削除に失敗しました');
+    showToast('日記を削除しました', 'success', null, 2200);
+  } catch (err) {
+    diaryData = snapshot;
+    renderDiary();
+    if (document.getElementById('view-nutrition').style.display !== 'none') renderNutritionView();
+    showToast(`削除失敗（元に戻しました）: ${err.message || err}`, 'error', null, 5000);
+  }
 }
 
 function resizeImageToJpgBase64(file, maxDim, quality) {

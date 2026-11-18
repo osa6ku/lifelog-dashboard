@@ -392,7 +392,8 @@ function addWatchEntry(payload) {
   if (payload.autoWiki) {
     enrichRow_(sheet, insertedRow);
   }
-  return { ok: true, row: insertedRow };
+  const r = sheet.getRange(insertedRow, 1, 1, 15).getValues()[0];
+  return { ok: true, row: insertedRow, entry: formatWatchRow_(insertedRow, r) };
 }
 
 function resolveRowByIdOrIndex_(sheet, idCol, row, id) {
@@ -734,12 +735,16 @@ function addDiaryEntry(payload) {
     for (let i = recent.length - 1; i >= 0; i--) {
       const r = recent[i];
       if (formatDateVal_(r[1]) === dateStr && String(r[4] || '').trim() === title && String(r[5] || '').trim() === body) {
+        const dupRow = checkStart + i;
+        const dupCols = getDiaryNutritionCols_(sheet, false);
+        const dupFull = sheet.getRange(dupRow, 1, 1, dupCols.totalCols).getValues()[0];
         return {
           ok: true,
           deduplicated: true,
           id: r[0],
-          row: checkStart + i,
+          row: dupRow,
           date: dateStr,
+          entry: formatDiaryRow_(dupRow, dupFull, dupCols),
         };
       }
     }
@@ -793,6 +798,9 @@ function addDiaryEntry(payload) {
     }
   }
 
+  const cols = getDiaryNutritionCols_(sheet, false);
+  const inserted = sheet.getRange(insertedRow, 1, 1, cols.totalCols).getValues()[0];
+
   return {
     ok: true,
     id: nextId,
@@ -800,6 +808,7 @@ function addDiaryEntry(payload) {
     date: dateStr,
     docSynced,
     failedPhotos,
+    entry: formatDiaryRow_(insertedRow, inserted, cols),
   };
 }
 
@@ -812,6 +821,7 @@ function updateDiaryEntry(payload) {
   const cur = sheet.getRange(row, 1, 1, 13).getValues()[0];
   const oldDate = formatDateVal_(cur[1]);
   const oldTitle = String(cur[4] || '');
+  const oldBody = String(cur[5] || '').trim();
 
   const dateStr = payload.date ? String(payload.date).slice(0, 10) : oldDate;
   const weekday = getWeekdayJa_(dateStr);
@@ -859,11 +869,15 @@ function updateDiaryEntry(payload) {
   const editedStamp = Utilities.formatDate(new Date(), 'Asia/Tokyo', 'yyyy-MM-dd HH:mm');
   sheet.getRange(row, 13).setValue(`edited ${editedStamp}`);
 
+  const needsDocSync = (dateStr !== oldDate) || (title !== oldTitle) || (body !== oldBody);
   let docSynced = false;
-  try {
-    docSynced = syncDiaryDocUpdate_(oldDate, oldTitle, dateStr, weekday, title, location, body);
-  } catch (err) {
-    // Doc同期が失敗してもスプレッドシートの保存結果は維持する
+  let docSyncSkipped = !needsDocSync;
+  if (needsDocSync) {
+    try {
+      docSynced = syncDiaryDocUpdate_(oldDate, oldTitle, dateStr, weekday, title, location, body);
+    } catch (err) {
+      // Doc同期が失敗してもスプレッドシートの保存結果は維持する
+    }
   }
 
   const cols = getDiaryNutritionCols_(sheet, false);
@@ -871,6 +885,7 @@ function updateDiaryEntry(payload) {
   return {
     ok: true,
     docSynced,
+    docSyncSkipped,
     entry: formatDiaryRow_(row, updated, cols),
   };
 }
