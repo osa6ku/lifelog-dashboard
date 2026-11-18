@@ -9,7 +9,7 @@
   <link rel="manifest" href="./manifest.json">
   <link rel="apple-touch-icon" href="./apple-touch-icon.png">
   <link rel="icon" type="image/png" href="./icon-192.png">
-  <title>ライフログ・ダッシュボード v1.2.0</title>
+  <title>ライフログ・ダッシュボード v1.3.0</title>
   <style>
     :root {
       --bg: #f4f6f9;
@@ -143,6 +143,30 @@
     .lightbox-img {
       width: 100%; max-height: 65vh; object-fit: contain; border-radius: 10px; background: #111827;
     }
+    .loc-row { display: flex; gap: 6px; align-items: center; }
+    .loc-row input { flex: 1; }
+    .btn-icon {
+      flex: 0 0 auto; height: 42px; min-width: 44px; padding: 0 10px;
+      border: 1px solid var(--border); border-radius: 10px;
+      background: #f9fafb; font-size: 16px; cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .btn-icon:active { background: #e5e7eb; }
+    .btn-icon:disabled { opacity: 0.5; cursor: wait; }
+    .loc-status { font-size: 12px; color: var(--muted); margin-top: 4px; min-height: 16px; }
+    .loc-suggestions {
+      margin-top: 6px; max-height: 190px; overflow-y: auto;
+      border: 1px solid var(--border); border-radius: 10px; background: #f9fafb;
+    }
+    .loc-item {
+      padding: 8px 10px; border-bottom: 1px solid var(--border); cursor: pointer;
+      display: flex; justify-content: space-between; align-items: center; gap: 8px;
+    }
+    .loc-item:last-child { border-bottom: none; }
+    .loc-item:active { background: #eff6ff; }
+    .loc-item-main { font-size: 13px; font-weight: 600; color: var(--text); }
+    .loc-item-sub { font-size: 11px; color: var(--muted); }
+    .loc-item-dist { font-size: 11px; color: var(--primary); font-weight: 600; white-space: nowrap; }
   </style>
 </head>
 <body>
@@ -150,7 +174,7 @@
   <div class="header-top">
     <h1 class="app-title">📚 ライフログ・ダッシュボード</h1>
     <div class="header-right">
-      <span class="ver-badge" id="app-version">v1.2.0</span>
+      <span class="ver-badge" id="app-version">v1.3.0</span>
       <button class="btn-sm" id="btn-check-update" onclick="manualCheckUpdate()" title="最新バージョン確認・更新">🔄 更新</button>
     </div>
   </div>
@@ -230,12 +254,21 @@
 
 <div class="modal-backdrop" id="modal-diary">
   <div class="modal">
-    <div class="modal-title"><span>📓 日記を書く</span><button class="btn-sm" onclick="closeModals()">✕</button></div>
+    <div class="modal-title"><span id="diary-modal-title">📓 日記を書く</span><button class="btn-sm" onclick="closeModals()">✕</button></div>
     <div class="field"><label>日付</label><input id="d-date" type="date"></div>
     <div class="field"><label>タイトル</label><input id="d-title" placeholder="今日のタイトル"></div>
-    <div class="field"><label>場所</label><input id="d-loc" placeholder="例: 自宅、渋谷など"></div>
+    <div class="field">
+      <label>場所・位置情報</label>
+      <div class="loc-row">
+        <input id="d-loc" placeholder="例: 自宅、渋谷など（入力して🔍または📍現在地）" onkeydown="if(event.key==='Enter'){event.preventDefault();searchLocationByKeyword();}">
+        <button type="button" class="btn-icon" id="btn-loc-gps" onclick="fetchNearbyLocations()" title="現在地から周辺スポットを取得">📍</button>
+        <button type="button" class="btn-icon" id="btn-loc-search" onclick="searchLocationByKeyword()" title="キーワードで場所を検索">🔍</button>
+      </div>
+      <div id="loc-status" class="loc-status"></div>
+      <div id="loc-suggestions" class="loc-suggestions" style="display:none;"></div>
+    </div>
     <div class="field"><label>本文 *</label><textarea id="d-body" rows="5" placeholder="出来事やメモ..."></textarea></div>
-    <div class="field"><label>写真（自動で1200px以下にリサイズしてDrive保存）</label><input id="d-photos" type="file" accept="image/*" multiple></div>
+    <div class="field"><label id="d-photos-label">写真（自動で1200px以下にリサイズしてDrive保存）</label><input id="d-photos" type="file" accept="image/*" multiple></div>
     <button class="btn-big btn-diary" style="width:100%;" id="btn-save-diary" onclick="submitDiary()">日記を保存する</button>
   </div>
 </div>
@@ -251,11 +284,12 @@
 </div>
 
 <script>
-const APP_VERSION = 'v1.2.0';
+const APP_VERSION = 'v1.3.0';
 const GAS_API_URL = 'https://script.google.com/macros/s/AKfycbxLecFd_9FWeR-2w2ThU5SYS7es-0IVKODoLWYgDJGfsoiQzsSRF9IFMAhtZTPl17CDKw/exec';
 
 let watchData = [];
 let diaryData = [];
+let editingDiary = null;
 let statusFilter = '進行中';
 let catFilter = 'ALL';
 let platFilter = 'ALL';
@@ -491,6 +525,9 @@ function renderDiary() {
       ${d.location ? `<div class="meta-row"><span>📍 ${esc(d.location)}</span></div>` : ''}
       <div class="card-summary" style="white-space:pre-wrap;">${esc(d.body)}</div>
       ${mediaHtml}
+      <div class="card-actions">
+        <button class="btn-sm primary" onclick="openEditDiaryModal(${Number(d.row || 0)}, '${esc(d.id)}')">✏️ 編集</button>
+      </div>
     </div>`;
   }).join('');
 
@@ -510,11 +547,196 @@ async function openImagePreview(fid, driveUrl) {
 }
 
 function openWatchModal() { document.getElementById('modal-watch').classList.add('open'); }
-function openDiaryModal() { document.getElementById('modal-diary').classList.add('open'); }
+function resetLocationPicker() {
+  document.getElementById('loc-status').textContent = '';
+  const box = document.getElementById('loc-suggestions');
+  box.style.display = 'none';
+  box.innerHTML = '';
+}
+function openDiaryModal() {
+  editingDiary = null;
+  document.getElementById('diary-modal-title').textContent = '📓 日記を書く';
+  document.getElementById('btn-save-diary').textContent = '日記を保存する';
+  document.getElementById('d-photos-label').textContent = '写真（自動で1200px以下にリサイズしてDrive保存）';
+  document.getElementById('d-date').value = new Date().toISOString().slice(0, 10);
+  document.getElementById('d-title').value = '';
+  document.getElementById('d-loc').value = '';
+  document.getElementById('d-body').value = '';
+  document.getElementById('d-photos').value = '';
+  resetLocationPicker();
+  document.getElementById('modal-diary').classList.add('open');
+}
+function openEditDiaryModal(row, id) {
+  const entry = diaryData.find(x => (row && x.row === row) || String(x.id) === String(id));
+  if (!entry) return;
+  editingDiary = entry;
+  document.getElementById('diary-modal-title').textContent = '✏️ 日記を編集';
+  document.getElementById('btn-save-diary').textContent = '変更を保存する';
+  document.getElementById('d-photos-label').textContent = '写真を追加（任意・既存写真は保持）';
+  document.getElementById('d-date').value = entry.date || '';
+  document.getElementById('d-title').value = entry.title || '';
+  document.getElementById('d-loc').value = entry.location || '';
+  document.getElementById('d-body').value = entry.body || '';
+  document.getElementById('d-photos').value = '';
+  resetLocationPicker();
+  document.getElementById('modal-diary').classList.add('open');
+}
 function closeModals() {
   document.getElementById('modal-watch').classList.remove('open');
   document.getElementById('modal-diary').classList.remove('open');
   document.getElementById('modal-image').classList.remove('open');
+}
+
+function calcDistanceMeters(lat1, lon1, lat2, lon2) {
+  const toRad = d => d * Math.PI / 180;
+  const R = 6371000;
+  const dLat = toRad(lat2 - lat1), dLon = toRad(lon2 - lon1);
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+  return Math.round(R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)));
+}
+
+function formatAddrSummary(addr) {
+  if (!addr) return '';
+  const pref = addr.province || addr.state || '';
+  const city = addr.city || addr.town || addr.village || addr.ward || addr.suburb || '';
+  const area = addr.quarter || addr.neighbourhood || addr.suburb || '';
+  return [pref, city, area !== city ? area : ''].filter(Boolean).join('');
+}
+
+let lastLocationCandidates = [];
+function renderLocationSuggestions(items) {
+  lastLocationCandidates = items;
+  const box = document.getElementById('loc-suggestions');
+  if (!items || items.length === 0) {
+    box.style.display = 'none';
+    box.innerHTML = '';
+    return;
+  }
+  box.innerHTML = items.map((it, idx) => `
+    <div class="loc-item" onclick="selectLocationCandidate(${idx})">
+      <div>
+        <div class="loc-item-main">${esc(it.name)}</div>
+        ${it.sub ? `<div class="loc-item-sub">${esc(it.sub)}</div>` : ''}
+      </div>
+      ${it.dist !== undefined ? `<div class="loc-item-dist">約${it.dist}m</div>` : ''}
+    </div>`).join('');
+  box.style.display = 'block';
+}
+
+function selectLocationCandidate(idx) {
+  const it = lastLocationCandidates[idx];
+  if (!it) return;
+  document.getElementById('d-loc').value = it.name;
+  document.getElementById('loc-status').textContent = `選択済み: ${it.name}`;
+  document.getElementById('loc-suggestions').style.display = 'none';
+}
+
+async function fetchNearbyLocations() {
+  if (!('geolocation' in navigator)) {
+    document.getElementById('loc-status').textContent = '⚠️ このブラウザは位置情報取得に対応していません';
+    return;
+  }
+  const btn = document.getElementById('btn-loc-gps');
+  const statusEl = document.getElementById('loc-status');
+  btn.disabled = true;
+  statusEl.textContent = '📡 現在地（GPS）を取得中...';
+  try {
+    const pos = await new Promise((resolve, reject) => {
+      navigator.geolocation.getCurrentPosition(resolve, reject, {
+        enableHighAccuracy: true, timeout: 10000, maximumAge: 60000,
+      });
+    });
+    const { latitude: lat, longitude: lon } = pos.coords;
+    statusEl.textContent = '🔍 周辺の住所・スポットを検索中...';
+
+    const nomUrl = `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lon}&accept-language=ja&addressdetails=1`;
+    const overpassQuery = `[out:json][timeout:8];(node(around:450,${lat},${lon})[name];way(around:450,${lat},${lon})[name];);out center 25;`;
+    const ovUrl = `https://overpass-api.de/api/interpreter?data=${encodeURIComponent(overpassQuery)}`;
+
+    const [nomRes, ovRes] = await Promise.allSettled([
+      fetch(nomUrl).then(r => r.ok ? r.json() : null),
+      fetch(ovUrl).then(r => r.ok ? r.json() : null),
+    ]);
+
+    const items = [];
+    const seen = new Set();
+    const addCandidate = (name, sub, dist) => {
+      const clean = String(name || '').trim();
+      if (!clean || seen.has(clean)) return;
+      seen.add(clean);
+      items.push({ name: clean, sub: sub || '', dist });
+    };
+
+    if (nomRes.status === 'fulfilled' && nomRes.value) {
+      const nom = nomRes.value;
+      const addr = nom.address || {};
+      const shortAddr = [addr.city || addr.ward || addr.town || addr.village || '', addr.suburb || addr.quarter || addr.neighbourhood || ''].filter(Boolean).join('');
+      const fullAddr = formatAddrSummary(addr);
+      if (nom.name) addCandidate(nom.name, fullAddr || '現在地スポット');
+      if (shortAddr) addCandidate(shortAddr, '現在地の市区町村・町名');
+      if (fullAddr && fullAddr !== shortAddr) addCandidate(fullAddr, '現在地の住所');
+    }
+
+    if (ovRes.status === 'fulfilled' && ovRes.value && Array.isArray(ovRes.value.elements)) {
+      const pois = ovRes.value.elements.map(el => {
+        const elLat = el.lat || (el.center && el.center.lat);
+        const elLon = el.lon || (el.center && el.center.lon);
+        const tags = el.tags || {};
+        const cat = tags.railway || tags.amenity || tags.shop || tags.leisure || tags.tourism || '';
+        const dist = (elLat && elLon) ? calcDistanceMeters(lat, lon, elLat, elLon) : 9999;
+        return { name: tags.name, sub: cat ? `周辺スポット (${cat})` : '周辺スポット', dist };
+      }).filter(p => p.name).sort((a, b) => a.dist - b.dist);
+      pois.slice(0, 15).forEach(p => addCandidate(p.name, p.sub, p.dist));
+    }
+
+    if (items.length === 0) {
+      statusEl.textContent = '⚠️ 周辺スポットが見つかりませんでした（手入力も可能です）';
+      renderLocationSuggestions([]);
+    } else {
+      statusEl.textContent = `候補 ${items.length}件（タップで選択）`;
+      renderLocationSuggestions(items);
+    }
+  } catch (err) {
+    statusEl.textContent = '⚠️ 位置情報の取得に失敗しました（許可設定をご確認ください）';
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function searchLocationByKeyword() {
+  const q = document.getElementById('d-loc').value.trim();
+  const statusEl = document.getElementById('loc-status');
+  if (!q) {
+    statusEl.textContent = '検索したい駅名・店舗名・地名を入力してください';
+    document.getElementById('d-loc').focus();
+    return;
+  }
+  const btn = document.getElementById('btn-loc-search');
+  btn.disabled = true;
+  statusEl.textContent = `🔍 「${q}」を検索中...`;
+  try {
+    const url = `https://nominatim.openstreetmap.org/search?format=jsonv2&q=${encodeURIComponent(q)}&accept-language=ja&addressdetails=1&limit=8`;
+    const res = await fetch(url);
+    if (!res.ok) throw new Error('Search failed');
+    const list = await res.json();
+    const items = (list || []).map(r => {
+      const primary = r.name || String(r.display_name || '').split(',')[0].trim();
+      const addrSub = formatAddrSummary(r.address) || String(r.display_name || '');
+      return { name: primary, sub: addrSub };
+    }).filter(it => it.name);
+
+    if (items.length === 0) {
+      statusEl.textContent = '該当する場所が見つかりませんでした（そのまま自由入力で保存できます）';
+      renderLocationSuggestions([]);
+    } else {
+      statusEl.textContent = `検索結果 ${items.length}件（タップで選択）`;
+      renderLocationSuggestions(items);
+    }
+  } catch (err) {
+    statusEl.textContent = '⚠️ 場所検索に失敗しました（ネットワーク状況をご確認ください）';
+  } finally {
+    btn.disabled = false;
+  }
 }
 
 async function submitWatch() {
@@ -541,19 +763,45 @@ async function submitDiary() {
   const body = document.getElementById('d-body').value.trim();
   if (!body) { alert('本文を入力してください'); return; }
   const btn = document.getElementById('btn-save-diary');
-  btn.disabled = true; btn.textContent = 'アップロード中...';
+  const isEdit = Boolean(editingDiary);
+  btn.disabled = true; btn.textContent = isEdit ? '更新中...' : 'アップロード中...';
   const files = Array.from(document.getElementById('d-photos').files || []);
   const photos = [];
   for (const f of files) photos.push(await resizeImageToJpgBase64(f, 1200, 0.8));
-  await apiPost('addDiary', {
+
+  const payload = {
     date: document.getElementById('d-date').value,
     title: document.getElementById('d-title').value,
     location: document.getElementById('d-loc').value,
     body, photos,
-  });
-  btn.disabled = false; btn.textContent = '日記を保存する';
-  document.getElementById('d-title').value = ''; document.getElementById('d-body').value = ''; document.getElementById('d-photos').value = '';
-  closeModals(); switchTab('diary'); loadDiaryData();
+  };
+
+  if (isEdit) {
+    payload.row = editingDiary.row;
+    payload.id = editingDiary.id;
+    const res = await apiPost('updateDiary', payload);
+    btn.disabled = false; btn.textContent = '変更を保存する';
+    if (!res || !res.ok) {
+      alert('更新に失敗しました: ' + ((res && res.error) || 'Unknown error'));
+      return;
+    }
+    if (res.entry) {
+      const idx = diaryData.findIndex(x => (res.entry.row && x.row === res.entry.row) || String(x.id) === String(res.entry.id));
+      if (idx >= 0) diaryData[idx] = res.entry;
+    }
+    editingDiary = null;
+    closeModals();
+    renderDiary();
+  } else {
+    const res = await apiPost('addDiary', payload);
+    btn.disabled = false; btn.textContent = '日記を保存する';
+    if (!res || !res.ok) {
+      alert('保存に失敗しました: ' + ((res && res.error) || 'Unknown error'));
+      return;
+    }
+    document.getElementById('d-title').value = ''; document.getElementById('d-loc').value = ''; document.getElementById('d-body').value = ''; document.getElementById('d-photos').value = '';
+    closeModals(); switchTab('diary'); loadDiaryData();
+  }
 }
 
 function resizeImageToJpgBase64(file, maxDim, quality) {

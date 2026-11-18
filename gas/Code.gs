@@ -297,6 +297,7 @@ function doPost(e) {
     if (action === 'addWatch') return jsonResponse_(addWatchEntry(body.payload || {}));
     if (action === 'updateWatch') return jsonResponse_(updateWatchCard(body.payload || {}));
     if (action === 'addDiary') return jsonResponse_(addDiaryEntry(body.payload || {}));
+    if (action === 'updateDiary') return jsonResponse_(updateDiaryEntry(body.payload || {}));
     return jsonResponse_({ ok: false, error: 'Unknown action: ' + action });
   } catch (err) {
     return jsonResponse_({ ok: false, error: String(err) });
@@ -430,6 +431,7 @@ function getDiaryEntries(limit) {
       return m ? m[1] : '';
     }).filter(Boolean);
     out.push({
+      row: startRow + i,
       id: r[0],
       date: formatDateVal_(r[1]),
       weekday: String(r[2] || ''),
@@ -458,35 +460,43 @@ function getImageDataUrl_(fileId, full) {
   }
 }
 
+function getWeekdayJa_(dateStr) {
+  const weekdays = ['日', '月', '火', '水', '木', '金', '土'];
+  const dt = new Date(dateStr + 'T00:00:00+09:00');
+  return weekdays[dt.getDay()] || '';
+}
+
+function saveDiaryPhotos_(dateStr, photos) {
+  const jpgNames = [];
+  const driveUrls = [];
+  let firstFileId = '';
+  if (!photos || photos.length === 0) return { jpgNames, driveUrls, firstFileId };
+
+  const ym = dateStr.slice(0, 7);
+  const ymFolder = getOrCreateSubfolder_(JOURNAL_IMAGES_FOLDER_ID, ym);
+  photos.forEach((p, idx) => {
+    const safeName = String(p.name || `photo_${idx + 1}.jpg`).replace(/\.[^.]+$/, '') + '.jpg';
+    const fileName = `${dateStr}_${safeName}`;
+    const bytes = Utilities.base64Decode(p.base64);
+    const blob = Utilities.newBlob(bytes, 'image/jpeg', fileName);
+    const file = ymFolder.createFile(blob);
+    jpgNames.push(fileName);
+    driveUrls.push(`https://drive.google.com/file/d/${file.getId()}/view`);
+    if (!firstFileId) firstFileId = file.getId();
+  });
+  return { jpgNames, driveUrls, firstFileId };
+}
+
 function addDiaryEntry(payload) {
   const dateStr = payload.date || Utilities.formatDate(new Date(), 'Asia/Tokyo', 'yyyy-MM-dd');
   const year = dateStr.slice(0, 4);
-  const ym = dateStr.slice(0, 7);
-  const weekdays = ['日', '月', '火', '水', '木', '金', '土'];
-  const dt = new Date(dateStr + 'T00:00:00+09:00');
-  const weekday = weekdays[dt.getDay()] || '';
+  const weekday = getWeekdayJa_(dateStr);
   const title = String(payload.title || '').trim();
   const body = String(payload.body || '').trim();
   const location = String(payload.location || '').trim();
 
   // 写真アップロード処理（リサイズ済みBase64を受信して journal_images/YYYY-MM/ へ保存）
-  const jpgNames = [];
-  const driveUrls = [];
-  let firstFileId = '';
-  const photos = payload.photos || [];
-  if (photos.length > 0) {
-    const ymFolder = getOrCreateSubfolder_(JOURNAL_IMAGES_FOLDER_ID, ym);
-    photos.forEach((p, idx) => {
-      const safeName = String(p.name || `photo_${idx + 1}.jpg`).replace(/\.[^.]+$/, '') + '.jpg';
-      const fileName = `${dateStr}_${safeName}`;
-      const bytes = Utilities.base64Decode(p.base64);
-      const blob = Utilities.newBlob(bytes, 'image/jpeg', fileName);
-      const file = ymFolder.createFile(blob);
-      jpgNames.push(fileName);
-      driveUrls.push(`https://drive.google.com/file/d/${file.getId()}/view`);
-      if (!firstFileId) firstFileId = file.getId();
-    });
-  }
+  const { jpgNames, driveUrls, firstFileId } = saveDiaryPhotos_(dateStr, payload.photos || []);
 
   const ss = SpreadsheetApp.openById(DIARY_SS_ID);
   const sheet = ss.getSheetByName(DIARY_SHEET_NAME);
@@ -529,6 +539,158 @@ function addDiaryEntry(payload) {
   }
 
   return { ok: true, id: nextId, date: dateStr };
+}
+
+function updateDiaryEntry(payload) {
+  const ss = SpreadsheetApp.openById(DIARY_SS_ID);
+  const sheet = ss.getSheetByName(DIARY_SHEET_NAME);
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 2) return { ok: false, error: 'No diary entries' };
+
+  let row = Number(payload.row || 0);
+  const targetId = payload.id;
+  const isRowValid = row >= 2 && row <= lastRow &&
+    (targetId === undefined || targetId === null || String(sheet.getRange(row, 1).getValue()) === String(targetId));
+
+  if (!isRowValid && targetId !== undefined && targetId !== null) {
+    const ids = sheet.getRange(2, 1, lastRow - 1, 1).getValues();
+    const idx = ids.findIndex(r => String(r[0]) === String(targetId));
+    row = idx >= 0 ? idx + 2 : 0;
+  }
+  if (row < 2 || row > lastRow) return { ok: false, error: 'Diary entry not found' };
+
+  const cur = sheet.getRange(row, 1, 1, 13).getValues()[0];
+  const oldDate = formatDateVal_(cur[1]);
+  const oldTitle = String(cur[4] || '');
+
+  const dateStr = payload.date ? String(payload.date).slice(0, 10) : oldDate;
+  const weekday = getWeekdayJa_(dateStr);
+  const title = payload.title !== undefined ? String(payload.title).trim() : oldTitle;
+  const body = payload.body !== undefined ? String(payload.body).trim() : String(cur[5] || '');
+  const location = payload.location !== undefined ? String(payload.location).trim() : String(cur[6] || '');
+
+  sheet.getRange(row, 2).setValue(dateStr);
+  sheet.getRange(row, 3).setValue(weekday);
+  sheet.getRange(row, 5).setValue(title);
+  sheet.getRange(row, 6).setValue(body);
+  sheet.getRange(row, 7).setValue(location);
+
+  // 追加写真がある場合のみ既存リストに追記
+  const added = saveDiaryPhotos_(dateStr, payload.photos || []);
+  if (added.jpgNames.length > 0) {
+    const prevNames = String(cur[8] || '').split('\n').filter(Boolean);
+    const prevUrls = String(cur[9] || '').split('\n').filter(Boolean);
+    const allNames = [...prevNames, ...added.jpgNames];
+    const allUrls = [...prevUrls, ...added.driveUrls];
+    sheet.getRange(row, 8).setValue(allNames.length);
+    sheet.getRange(row, 9).setValue(allNames.join('\n'));
+    sheet.getRange(row, 10).setValue(allUrls.join('\n'));
+    if (!cur[10] && added.firstFileId) {
+      sheet.getRange(row, 11).setValue(`=IMAGE("https://drive.google.com/uc?export=view&id=${added.firstFileId}")`);
+    }
+  }
+
+  const editedStamp = Utilities.formatDate(new Date(), 'Asia/Tokyo', 'yyyy-MM-dd HH:mm');
+  sheet.getRange(row, 13).setValue(`edited ${editedStamp}`);
+
+  let docSynced = false;
+  try {
+    docSynced = syncDiaryDocUpdate_(oldDate, oldTitle, dateStr, weekday, title, location, body);
+  } catch (err) {
+    // Doc同期が失敗してもスプレッドシートの保存結果は維持する
+  }
+
+  const updated = sheet.getRange(row, 1, 1, 13).getValues()[0];
+  const imageUrls = String(updated[9] || '').split('\n').filter(Boolean);
+  const imageIds = imageUrls.map(u => {
+    const m = u.match(/\/d\/([^/]+)/);
+    return m ? m[1] : '';
+  }).filter(Boolean);
+
+  return {
+    ok: true,
+    docSynced,
+    entry: {
+      row,
+      id: updated[0],
+      date: formatDateVal_(updated[1]),
+      weekday: String(updated[2] || ''),
+      title: String(updated[4] || ''),
+      body: String(updated[5] || ''),
+      location: String(updated[6] || ''),
+      imageCount: Number(updated[7] || 0),
+      imageUrls,
+      imageIds,
+    },
+  };
+}
+
+function syncDiaryDocUpdate_(oldDate, oldTitle, newDate, newWeekday, newTitle, newLocation, newBody) {
+  const year = newDate.slice(0, 4);
+  const docId = YEAR_DOC_IDS[year];
+  if (!docId || oldDate.slice(0, 4) !== year) return false;
+
+  const doc = DocumentApp.openById(docId);
+  const docBody = doc.getBody();
+  const numChildren = docBody.getNumChildren();
+  const titlePrefix = oldTitle ? `${oldDate}` : `${oldDate}`;
+  let headingIdx = -1;
+
+  for (let i = 0; i < numChildren; i++) {
+    const el = docBody.getChild(i);
+    if (el.getType() !== DocumentApp.ElementType.PARAGRAPH) continue;
+    const p = el.asParagraph();
+    if (p.getHeading() !== DocumentApp.ParagraphHeading.HEADING2) continue;
+    const txt = p.getText();
+    if (txt.startsWith(titlePrefix) && (!oldTitle || txt.includes(oldTitle))) {
+      headingIdx = i;
+      break;
+    }
+  }
+  if (headingIdx < 0) return false;
+
+  const newHeading = `${newDate} (${newWeekday}) — ${newTitle || '(無題)'}`;
+  docBody.getChild(headingIdx).asParagraph().setText(newHeading);
+
+  // 見出しの次〜HorizontalRule（または次のHEADING2）までの位置・本文を更新（写真リンク段落は保持）
+  const photoInsertIdx = [];
+  const removeIndices = [];
+  let endIdx = numChildren;
+  for (let i = headingIdx + 1; i < numChildren; i++) {
+    const el = docBody.getChild(i);
+    const t = el.getType();
+    if (t === DocumentApp.ElementType.HORIZONTAL_RULE) {
+      endIdx = i;
+      break;
+    }
+    if (t === DocumentApp.ElementType.PARAGRAPH) {
+      const p = el.asParagraph();
+      if (p.getHeading() === DocumentApp.ParagraphHeading.HEADING2) {
+        endIdx = i;
+        break;
+      }
+      if (p.getText().startsWith('📷')) {
+        photoInsertIdx.push(i);
+      } else {
+        removeIndices.push(i);
+      }
+    }
+  }
+
+  for (let i = removeIndices.length - 1; i >= 0; i--) {
+    docBody.removeChild(docBody.getChild(removeIndices[i]));
+  }
+
+  let insertAt = headingIdx + 1;
+  if (newLocation) {
+    docBody.insertParagraph(insertAt, `📍 場所: ${newLocation}`);
+    insertAt++;
+  }
+  if (newBody) {
+    docBody.insertParagraph(insertAt, newBody);
+  }
+  doc.saveAndClose();
+  return true;
 }
 
 function getOrCreateSubfolder_(parentId, name) {
