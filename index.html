@@ -1540,10 +1540,7 @@ function openEditDiaryModal(row, id) {
   document.getElementById('modal-diary').classList.add('open');
 }
 function closeModals() {
-  document.getElementById('modal-watch').classList.remove('open');
-  document.getElementById('modal-diary').classList.remove('open');
-  document.getElementById('modal-meal').classList.remove('open');
-  document.getElementById('modal-image').classList.remove('open');
+  document.querySelectorAll('.modal-backdrop.open').forEach(m => m.classList.remove('open'));
 }
 
 function highlightElement(el) {
