@@ -9,7 +9,7 @@
   <link rel="manifest" href="./manifest.json">
   <link rel="apple-touch-icon" href="./apple-touch-icon.png">
   <link rel="icon" type="image/png" href="./icon-192.png">
-  <title>ライフログ・ダッシュボード</title>
+  <title>ライフログ・ダッシュボード v1.2.0</title>
   <style>
     :root {
       --bg: #f4f6f9;
@@ -33,6 +33,16 @@
       padding: 10px 14px;
     }
     .header-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+    .header-right { display: flex; align-items: center; gap: 6px; }
+    .ver-badge {
+      font-size: 11px; font-weight: 700; padding: 2px 7px; border-radius: 999px;
+      background: #f3f4f6; color: #4b5563; border: 1px solid var(--border);
+    }
+    .update-banner {
+      display: none; background: #fef3c7; color: #92400e; border-bottom: 1px solid #fde68a;
+      padding: 10px 14px; font-size: 13px; font-weight: 700; text-align: center; cursor: pointer;
+    }
+    .update-banner.show { display: block; }
     .app-title { font-size: 17px; font-weight: 700; margin: 0; }
     .quick-links { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
     .q-link {
@@ -139,6 +149,10 @@
 <header>
   <div class="header-top">
     <h1 class="app-title">📚 ライフログ・ダッシュボード</h1>
+    <div class="header-right">
+      <span class="ver-badge" id="app-version">v1.2.0</span>
+      <button class="btn-sm" id="btn-check-update" onclick="manualCheckUpdate()" title="最新バージョン確認・更新">🔄 更新</button>
+    </div>
   </div>
   <div class="quick-links">
     <a class="q-link" target="_blank" href="https://docs.google.com/spreadsheets/d/1dvf7aVJA_B8SgkIB1qGzJztZ6hRPiA7SLb0xssY142E/edit">🎬 鑑賞記録DB</a>
@@ -150,6 +164,9 @@
     <button class="btn-big btn-diary" onclick="openDiaryModal()">＋ 日記を書く</button>
   </div>
 </header>
+<div id="update-banner" class="update-banner" onclick="forceAppUpdate()">
+  ✨ 新しいバージョン（<span id="new-ver-label"></span>）があります — タップして更新
+</div>
 
 <main class="container">
   <section id="view-watch">
@@ -234,6 +251,7 @@
 </div>
 
 <script>
+const APP_VERSION = 'v1.2.0';
 const GAS_API_URL = 'https://script.google.com/macros/s/AKfycbxLecFd_9FWeR-2w2ThU5SYS7es-0IVKODoLWYgDJGfsoiQzsSRF9IFMAhtZTPl17CDKw/exec';
 
 let watchData = [];
@@ -246,8 +264,54 @@ window.onload = () => {
   const today = new Date().toISOString().slice(0, 10);
   document.getElementById('w-date').value = today;
   document.getElementById('d-date').value = today;
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register(`./sw.js?v=${encodeURIComponent(APP_VERSION)}`).catch(() => {});
+  }
+  checkForUpdate();
   loadWatchData();
 };
+
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') checkForUpdate();
+});
+
+async function checkForUpdate() {
+  try {
+    const res = await fetch(`./version.json?t=${Date.now()}`, { cache: 'no-store' });
+    if (!res.ok) return null;
+    const info = await res.json();
+    if (info && info.version && info.version !== APP_VERSION) {
+      document.getElementById('new-ver-label').textContent = info.version;
+      document.getElementById('update-banner').classList.add('show');
+    }
+    return info;
+  } catch (e) {
+    return null;
+  }
+}
+
+async function manualCheckUpdate() {
+  const btn = document.getElementById('btn-check-update');
+  btn.disabled = true;
+  btn.textContent = '確認中...';
+  await checkForUpdate();
+  await forceAppUpdate();
+}
+
+async function forceAppUpdate() {
+  try {
+    if ('caches' in window) {
+      const keys = await caches.keys();
+      await Promise.all(keys.map(k => caches.delete(k)));
+    }
+    if ('serviceWorker' in navigator) {
+      const regs = await navigator.serviceWorker.getRegistrations();
+      await Promise.all(regs.map(r => r.update()));
+    }
+    sessionStorage.clear();
+  } catch (e) { /* ignore */ }
+  location.reload();
+}
 
 function switchTab(tab) {
   document.getElementById('view-watch').style.display = tab === 'watch' ? 'block' : 'none';
