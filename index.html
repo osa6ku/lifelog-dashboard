@@ -9,7 +9,7 @@
   <link rel="manifest" href="./manifest.json">
   <link rel="apple-touch-icon" href="./apple-touch-icon.png">
   <link rel="icon" type="image/png" href="./icon-192.png">
-  <title>ライフログ・ダッシュボード v1.16.0</title>
+  <title>ライフログ・ダッシュボード v1.17.0</title>
   <style>
     :root {
       --bg: #f4f6f9;
@@ -290,7 +290,7 @@
   <div class="header-top">
     <h1 class="app-title">📚 ライフログ・ダッシュボード</h1>
     <div class="header-right">
-      <button type="button" class="ver-badge" id="app-version" onclick="openReleaseNotesModal()" title="変更履歴（リリースノート）を表示">📋 v1.16.0</button>
+      <button type="button" class="ver-badge" id="app-version" onclick="openReleaseNotesModal()" title="変更履歴（リリースノート）を表示">📋 v1.17.0</button>
       <button class="btn-sm" id="btn-check-update" onclick="manualCheckUpdate()" title="最新バージョン確認・更新">🔄 更新</button>
     </div>
   </div>
@@ -531,8 +531,9 @@
 </div>
 
 <script>
-const APP_VERSION = 'v1.16.0';
+const APP_VERSION = 'v1.17.0';
 const DEFAULT_RELEASE_NOTES = [
+  { version: 'v1.17.0', date: '2026-11-19', title: '当日日付初期セット＆場所選択UI改善', items: ['日記・鑑賞記録・食事の新規作成時にローカルタイムゾーン基準の当日日付（YYYY-MM-DD）を自動セット（UTCズレ解消）', '場所入力欄の検索前候補として「自宅」「会社」（座標引き継ぎ対応）＋過去の場所履歴を即時リスト表示', '空欄検索・現在地取得（📍）でGPS近傍スポットをリスト表示・ワンタップ追加できるよう改善'] },
   { version: 'v1.16.0', date: '2026-11-18', title: '変更履歴モーダル＆バージョンボタン化', items: ['ヘッダーのバージョンバッジをタップ可能なボタン（📋 v1.16.0）へ変更', 'v1.0.0〜最新までの変更履歴（リリースノート）を縦スクロール閲覧できるモーダルポップアップを追加'] },
   { version: 'v1.15.0', date: '2026-11-18', title: '関連URLカード表示＆インライン直接編集UI', items: ['鑑賞記録カード上に「関連URL」クリック可能バッジ（改行・カンマ複数URL対応）を常時表示', '日記本文・鑑賞記録感想メモをカード上でそのまま書き足しできるインライン直接編集UIを実装', '詳細編集モーダルの本文・感想メモ入力欄を大幅に拡大（220px+）'] },
   { version: 'v1.14.1', date: '2026-11-18', title: 'Wikipedia補完時の記事消失バグ修正', items: ['Wikipedia API URL内のパイプ文字エンコード漏れによるGAS例外を修正', '補完時の既存キャスト・概要・ステータス・メモ保護およびエラー時状態保持を実装'] },
@@ -595,7 +596,7 @@ let catFilter = 'ALL';
 let platFilter = 'ALL';
 
 window.onload = () => {
-  const today = new Date().toISOString().slice(0, 10);
+  const today = getLocalTodayIso();
   document.getElementById('w-date').value = today;
   document.getElementById('d-date').value = today;
   if ('serviceWorker' in navigator) {
@@ -1350,7 +1351,7 @@ function openWatchModal() {
   document.getElementById('w-plat').value = '';
   document.getElementById('w-status').value = '進行中';
   document.getElementById('w-rating').value = '';
-  document.getElementById('w-date').value = new Date().toISOString().slice(0, 10);
+  document.getElementById('w-date').value = getLocalTodayIso();
   document.getElementById('w-memo').value = '';
   document.getElementById('w-year').value = '';
   document.getElementById('w-cast').value = '';
@@ -1480,6 +1481,11 @@ function toggleRemoveExistingPhoto(url) {
   renderEditExistingPhotos(editingDiary);
 }
 
+function getLocalTodayIso() {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+}
+
 function resetLocationPicker() {
   document.getElementById('loc-status').textContent = '';
   const box = document.getElementById('loc-suggestions');
@@ -1496,7 +1502,7 @@ function openDiaryModal() {
   document.getElementById('btn-save-diary').textContent = '日記を保存する';
   document.getElementById('btn-delete-diary').style.display = 'none';
   document.getElementById('d-photos-label').textContent = '写真（自動で1200px以下にリサイズしてDrive保存）';
-  document.getElementById('d-date').value = new Date().toISOString().slice(0, 10);
+  document.getElementById('d-date').value = getLocalTodayIso();
   document.getElementById('d-title').value = '';
   document.getElementById('d-loc').value = '';
   document.getElementById('d-body').value = '';
@@ -1510,6 +1516,7 @@ function openDiaryModal() {
   renderLocationChips();
   renderEditExistingPhotos(null);
   resetLocationPicker();
+  showLocationHistory();
   document.getElementById('modal-diary').classList.add('open');
 }
 
@@ -1537,6 +1544,7 @@ function openEditDiaryModal(row, id) {
   renderLocationChips();
   renderEditExistingPhotos(entry);
   resetLocationPicker();
+  showLocationHistory();
   document.getElementById('modal-diary').classList.add('open');
 }
 function closeModals() {
@@ -1595,7 +1603,7 @@ function openMealModal(presetDate) {
   document.getElementById('meal-modal-title').textContent = '🍽️ 食事を記録';
   document.getElementById('btn-save-meal').textContent = '食事を保存する';
   document.getElementById('btn-delete-meal').style.display = 'none';
-  document.getElementById('m-date').value = presetDate || new Date().toISOString().slice(0, 10);
+  document.getElementById('m-date').value = presetDate || getLocalTodayIso();
   document.getElementById('m-type').value = '昼食';
   document.getElementById('m-dish').value = '';
   document.getElementById('m-cal').value = '';
@@ -1839,9 +1847,39 @@ function saveLocationToHistory(locs) {
   } catch (e) { /* ignore */ }
 }
 
+const QUICK_LOCATION_PRESETS = [
+  { name: '自宅', icon: '🏠' },
+  { name: '会社', icon: '🏢' },
+];
+
 function getDiaryLocationHistory(query) {
   const q = String(query || '').trim().toLowerCase();
+  const allCoords = new Map();
+  const recordCoord = (l) => {
+    const name = String((l && l.name) || '').trim();
+    if (!name) return;
+    const lat = (l.lat !== null && l.lat !== undefined && !isNaN(Number(l.lat))) ? Number(l.lat) : null;
+    const lng = (l.lng !== null && l.lng !== undefined && !isNaN(Number(l.lng))) ? Number(l.lng) : null;
+    if (lat !== null && lng !== null && !allCoords.has(name)) {
+      allCoords.set(name, { lat, lng });
+    }
+  };
+  getSavedLocHistory().forEach(recordCoord);
+  diaryData.forEach(d => normalizeDiaryLocations(d).forEach(recordCoord));
+
   const map = new Map();
+  // 先頭に定番スポット（自宅・会社）を配置（過去の座標があれば自動引き継ぎ）
+  QUICK_LOCATION_PRESETS.forEach(p => {
+    if (q && !p.name.toLowerCase().includes(q)) return;
+    const coord = allCoords.get(p.name) || { lat: null, lng: null };
+    map.set(p.name, {
+      name: p.name,
+      lat: coord.lat,
+      lng: coord.lng,
+      sub: coord.lat !== null ? `${p.icon} 定番スポット (座標あり)` : `${p.icon} 定番スポット`,
+    });
+  });
+
   const pushLoc = (l, sourceLabel) => {
     const name = String((l && l.name) || '').trim();
     if (!name) return;
@@ -1864,7 +1902,7 @@ function getDiaryLocationHistory(query) {
   diaryData.forEach(d => {
     normalizeDiaryLocations(d).forEach(l => pushLoc(l, `🕒 ${d.date} の履歴`));
   });
-  return Array.from(map.values()).slice(0, q ? 10 : 15);
+  return Array.from(map.values()).slice(0, q ? 12 : 17);
 }
 
 function showLocationHistory() {
@@ -1873,8 +1911,8 @@ function showLocationHistory() {
   const statusEl = document.getElementById('loc-status');
   if (hist.length > 0) {
     statusEl.textContent = q.trim()
-      ? `履歴候補 ${hist.length}件（タップで追加 / 🔍で新規検索）`
-      : `最近の場所履歴 ${hist.length}件（タップで追加）`;
+      ? `候補 ${hist.length}件（タップで追加 / 🔍で新規検索）`
+      : `定番・履歴 ${hist.length}件（タップで追加 / 📍で現在地近傍を検索）`;
     renderLocationSuggestions(hist);
   } else {
     renderLocationSuggestions([]);
@@ -1969,11 +2007,7 @@ async function searchLocationByKeyword() {
   const q = document.getElementById('d-loc').value.trim();
   const statusEl = document.getElementById('loc-status');
   if (!q) {
-    showLocationHistory();
-    if (getDiaryLocationHistory('').length === 0) {
-      statusEl.textContent = '検索したい駅名・店舗名・地名を入力してください';
-    }
-    document.getElementById('d-loc').focus();
+    await fetchNearbyLocations();
     return;
   }
   const btn = document.getElementById('btn-loc-search');
