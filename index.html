@@ -9,7 +9,7 @@
   <link rel="manifest" href="./manifest.json">
   <link rel="apple-touch-icon" href="./apple-touch-icon.png">
   <link rel="icon" type="image/png" href="./icon-192.png">
-  <title>ライフログ・ダッシュボード v1.11.1</title>
+  <title>ライフログ・ダッシュボード v1.11.2</title>
   <style>
     :root {
       --bg: #f4f6f9;
@@ -260,7 +260,7 @@
   <div class="header-top">
     <h1 class="app-title">📚 ライフログ・ダッシュボード</h1>
     <div class="header-right">
-      <span class="ver-badge" id="app-version">v1.11.1</span>
+      <span class="ver-badge" id="app-version">v1.11.2</span>
       <button class="btn-sm" id="btn-check-update" onclick="manualCheckUpdate()" title="最新バージョン確認・更新">🔄 更新</button>
     </div>
   </div>
@@ -279,7 +279,7 @@
 </div>
 
 <main class="container">
-  <section id="view-watch">
+  <section id="view-watch" style="display:none;">
     <div class="search-row">
       <input class="search-input" id="watch-search" type="search" placeholder="タイトル・キャスト・メモを検索..." oninput="renderWatch()">
       <select class="sort-select" id="watch-sort" onchange="renderWatch()">
@@ -308,7 +308,7 @@
     <div id="watch-list"><div class="loading">鑑賞記録を読み込んでいます...</div></div>
   </section>
 
-  <section id="view-diary" style="display:none;">
+  <section id="view-diary">
     <div class="search-row">
       <input class="search-input" id="diary-search" type="search" placeholder="日記のタイトル・本文・場所を検索..." oninput="renderDiary()">
       <input class="sort-select" id="diary-ym" type="month" onchange="renderDiary()" title="年月ジャンプ">
@@ -341,8 +341,8 @@
 </main>
 
 <nav class="bottom-nav">
-  <button class="nav-btn active" id="nav-watch" onclick="switchTab('watch')"><span>🎬</span><span>鑑賞記録</span></button>
-  <button class="nav-btn" id="nav-diary" onclick="switchTab('diary')"><span>📓</span><span>日記</span></button>
+  <button class="nav-btn" id="nav-watch" onclick="switchTab('watch')"><span>🎬</span><span>鑑賞記録</span></button>
+  <button class="nav-btn active" id="nav-diary" onclick="switchTab('diary')"><span>📓</span><span>日記</span></button>
   <button class="nav-btn" id="nav-nutrition" onclick="switchTab('nutrition')"><span>🍽️</span><span>食事・栄養</span></button>
 </nav>
 
@@ -491,7 +491,7 @@
 </div>
 
 <script>
-const APP_VERSION = 'v1.11.1';
+const APP_VERSION = 'v1.11.2';
 const GAS_API_URL = 'https://script.google.com/macros/s/AKfycbxLecFd_9FWeR-2w2ThU5SYS7es-0IVKODoLWYgDJGfsoiQzsSRF9IFMAhtZTPl17CDKw/exec';
 
 let watchData = [];
@@ -515,7 +515,7 @@ window.onload = () => {
     navigator.serviceWorker.register(`./sw.js?v=${encodeURIComponent(APP_VERSION)}`).catch(() => {});
   }
   checkForUpdate();
-  loadWatchData();
+  switchTab('diary');
 };
 
 document.addEventListener('visibilitychange', () => {
@@ -567,6 +567,9 @@ function switchTab(tab) {
   document.getElementById('nav-watch').classList.toggle('active', tab === 'watch');
   document.getElementById('nav-diary').classList.toggle('active', tab === 'diary');
   document.getElementById('nav-nutrition').classList.toggle('active', tab === 'nutrition');
+  if (tab === 'watch' && watchData.length === 0) {
+    loadWatchData();
+  }
   if (tab === 'diary') {
     if (mealData.length === 0) loadMealsData(false);
     if (diaryData.length === 0) loadDiaryData();
