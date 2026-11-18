@@ -467,6 +467,9 @@ function updateWatchCard(payload) {
   if (payload.rating !== undefined) {
     sheet.getRange(row, COL.RATING).setValue(payload.rating);
   }
+  if (payload.memo !== undefined) {
+    sheet.getRange(row, COL.MEMO).setValue(String(payload.memo).trim());
+  }
   if (payload.runWiki) {
     enrichRow_(sheet, row);
   }

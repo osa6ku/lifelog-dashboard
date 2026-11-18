@@ -9,7 +9,7 @@
   <link rel="manifest" href="./manifest.json">
   <link rel="apple-touch-icon" href="./apple-touch-icon.png">
   <link rel="icon" type="image/png" href="./icon-192.png">
-  <title>ライフログ・ダッシュボード v1.14.1</title>
+  <title>ライフログ・ダッシュボード v1.15.0</title>
   <style>
     :root {
       --bg: #f4f6f9;
@@ -254,6 +254,24 @@
       border: 1px solid rgba(255,255,255,0.6); background: rgba(255,255,255,0.15);
       color: #fff; border-radius: 8px; padding: 4px 10px; font-size: 12px; font-weight: 700; cursor: pointer; white-space: nowrap;
     }
+    .related-url-row { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0; }
+    .related-url-badge {
+      display: inline-flex; align-items: center; gap: 4px;
+      background: #eff6ff; color: #1d4ed8; border: 1px solid #bfdbfe;
+      border-radius: 6px; padding: 4px 9px; font-size: 12px; font-weight: 600;
+      text-decoration: none; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .related-url-badge:hover { background: #dbeafe; }
+    .editable-text-area { cursor: text; border-radius: 6px; padding: 2px 4px; margin: -2px -4px; transition: background 0.15s; }
+    .editable-text-area:hover { background: #f9fafb; }
+    .inline-edit-wrap { margin-top: 6px; }
+    .inline-edit-ta {
+      width: 100%; min-height: 180px; padding: 10px 12px;
+      border: 1.5px solid var(--primary); border-radius: 8px;
+      font-size: 14px; line-height: 1.6; font-family: inherit;
+      resize: vertical; background: #fff; color: var(--text); box-sizing: border-box;
+    }
+    .inline-edit-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; align-items: center; }
   </style>
 </head>
 <body>
@@ -261,7 +279,7 @@
   <div class="header-top">
     <h1 class="app-title">📚 ライフログ・ダッシュボード</h1>
     <div class="header-right">
-      <span class="ver-badge" id="app-version">v1.14.1</span>
+      <span class="ver-badge" id="app-version">v1.15.0</span>
       <button class="btn-sm" id="btn-check-update" onclick="manualCheckUpdate()" title="最新バージョン確認・更新">🔄 更新</button>
     </div>
   </div>
@@ -360,7 +378,7 @@
       <div class="field"><label>鑑賞日</label><input id="w-date" type="date"></div>
     </div>
     <div class="field"><label>プラットフォーム（カンマ区切り可）</label><input id="w-plat" placeholder="例: Netflix, 映画館, TBS"></div>
-    <div class="field"><label>メモ・感想</label><textarea id="w-memo" rows="3"></textarea></div>
+    <div class="field"><label>メモ・感想</label><textarea id="w-memo" rows="8" style="min-height:220px;line-height:1.6;" oninput="autoResizeTextarea(this, 220)"></textarea></div>
     <details id="watch-extra-details">
       <summary>詳細項目（公開年・キャスト・スタッフ・概要・URL）</summary>
       <div class="field"><label>公開年・放送年</label><input id="w-year" placeholder="例: 2026"></div>
@@ -392,7 +410,7 @@
       <div id="loc-status" class="loc-status"></div>
       <div id="loc-suggestions" class="loc-suggestions" style="display:none;"></div>
     </div>
-    <div class="field"><label>本文 *</label><textarea id="d-body" rows="5" placeholder="出来事やメモ..."></textarea></div>
+    <div class="field"><label>本文 *</label><textarea id="d-body" rows="8" style="min-height:220px;line-height:1.6;" oninput="autoResizeTextarea(this, 220)" placeholder="出来事やメモ..."></textarea></div>
     <div class="meal-box">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
         <strong style="font-size:13px;color:#047857;">🍽️ 食事・栄養ログ（任意）</strong>
@@ -492,7 +510,7 @@
 </div>
 
 <script>
-const APP_VERSION = 'v1.14.1';
+const APP_VERSION = 'v1.15.0';
 const GAS_API_URL = 'https://script.google.com/macros/s/AKfycbxLecFd_9FWeR-2w2ThU5SYS7es-0IVKODoLWYgDJGfsoiQzsSRF9IFMAhtZTPl17CDKw/exec';
 
 let watchData = [];
@@ -701,6 +719,19 @@ function renderWatch() {
     const nextStatus = item.status === '進行中' ? '完了' : '進行中';
     const nextLabel = item.status === '進行中' ? '✅ 完了にする' : '▶ 進行中に戻す';
     const stars = item.rating ? '★'.repeat(Number(item.rating)) : '';
+    const isEditing = activeInlineEdit && activeInlineEdit.type === 'watch' && Number(activeInlineEdit.row) === Number(item.row);
+    const memoHtml = isEditing
+      ? `<div class="inline-edit-wrap">
+          <textarea id="inline-ta-watch-${item.row}" class="inline-edit-ta" oninput="autoResizeTextarea(this, 180)" placeholder="感想・メモを書き足す...">${esc(item.memo || '')}</textarea>
+          <div class="inline-edit-actions">
+            <button class="btn-sm primary" onclick="saveInlineWatch(${item.row})">💾 保存</button>
+            <button class="btn-sm" onclick="cancelInlineEdit()">キャンセル</button>
+            <button class="btn-sm" onclick="openDetailFromInline('watch', ${item.row}, '${esc(item.id)}')">⚙️ 詳細項目を編集</button>
+          </div>
+        </div>`
+      : (item.memo
+          ? `<div class="card-cast editable-text-area" style="white-space:pre-wrap;word-break:break-word;" onclick="startInlineEdit('watch', ${item.row}, event)">📝 ${renderRichText(item.memo)}</div>`
+          : `<div class="card-cast editable-text-area" style="color:#9ca3af;" onclick="startInlineEdit('watch', ${item.row}, event)">📝 タップして感想・メモを追記...</div>`);
     return `
       <div class="card" id="wcard-${item.row}">
         <div class="card-head"><div class="card-title">${esc(item.title)}</div><span class="badge ${bClass}">${esc(item.status || '未設定')}</span></div>
@@ -711,11 +742,12 @@ function renderWatch() {
           ${stars ? `<span style="color:#f59e0b;font-weight:700;">${stars}</span>` : ''}
         </div>
         ${item.platform ? `<div class="meta-row"><span class="tag-pill">📺 ${esc(item.platform)}</span></div>` : ''}
+        ${renderRelatedUrlBadges(item.relatedUrl)}
         ${item.cast ? `<div class="card-cast">👥 ${esc(item.cast)}</div>` : ''}
         ${item.summary ? `<div class="card-summary" style="white-space:pre-wrap;word-break:break-word;">${renderRichText(item.summary)}</div>` : ''}
-        ${item.memo ? `<div class="card-cast" style="white-space:pre-wrap;word-break:break-word;">📝 ${renderRichText(item.memo)}</div>` : ''}
+        ${memoHtml}
         <div class="card-actions">
-          <button class="btn-sm primary" onclick="openEditWatchModal(${item.row}, '${esc(item.id)}')">✏️ 編集</button>
+          <button class="btn-sm primary" onclick="startInlineEdit('watch', ${item.row})">✏️ 編集</button>
           <button class="btn-sm success" onclick="quickUpdate(${item.row}, {status:'${nextStatus}'})">${nextLabel}</button>
           <select class="btn-sm" onchange="if(this.value) quickUpdate(${item.row}, {rating:this.value})">
             <option value="">評価変更</option><option value="5">★5</option><option value="4">★4</option><option value="3">★3</option><option value="2">★2</option><option value="1">★1</option>
@@ -724,6 +756,137 @@ function renderWatch() {
         </div>
       </div>`;
   }).join('');
+}
+
+let activeInlineEdit = null;
+
+function renderRelatedUrlBadges(rawUrl) {
+  const urls = String(rawUrl || '')
+    .split(/[\n,]+/)
+    .map(s => s.trim())
+    .filter(s => /^https?:\/\//i.test(s));
+  if (urls.length === 0) return '';
+  return `<div class="related-url-row">${urls.map(u => {
+    let label = u;
+    try {
+      const parsed = new URL(u);
+      label = parsed.hostname.replace(/^www\./, '');
+    } catch (_) {}
+    return `<a class="related-url-badge" href="${esc(u)}" target="_blank" rel="noopener noreferrer" title="${esc(u)}" onclick="event.stopPropagation()">🔗 ${esc(label)}</a>`;
+  }).join('')}</div>`;
+}
+
+function autoResizeTextarea(el, minH = 180) {
+  if (!el) return;
+  el.style.height = 'auto';
+  el.style.height = Math.max(el.scrollHeight + 4, minH) + 'px';
+}
+
+function startInlineEdit(type, row, event) {
+  if (event && event.target && event.target.closest('a, button, select, input, textarea')) return;
+  activeInlineEdit = { type, row: Number(row) };
+  renderDiary();
+  renderWatch();
+  setTimeout(() => {
+    const ta = document.getElementById(`inline-ta-${type}-${Number(row)}`);
+    if (ta) {
+      autoResizeTextarea(ta, 180);
+      ta.focus();
+      const len = ta.value.length;
+      ta.setSelectionRange(len, len);
+    }
+  }, 0);
+}
+
+function cancelInlineEdit() {
+  activeInlineEdit = null;
+  renderDiary();
+  renderWatch();
+}
+
+function openDetailFromInline(type, row, id) {
+  activeInlineEdit = null;
+  renderDiary();
+  renderWatch();
+  if (type === 'diary') openEditDiaryModal(row, id);
+  else openEditWatchModal(row, id);
+}
+
+async function saveInlineWatch(row) {
+  const ta = document.getElementById(`inline-ta-watch-${Number(row)}`);
+  if (!ta) return;
+  const newMemo = ta.value;
+  const idx = watchData.findIndex(x => Number(x.row) === Number(row));
+  if (idx < 0) return;
+  const prevItem = { ...watchData[idx] };
+  watchData[idx] = { ...prevItem, memo: newMemo };
+  activeInlineEdit = null;
+  renderWatch();
+  showToast('保存しました');
+  try {
+    const updated = await apiPost('updateWatch', {
+      row: prevItem.row,
+      id: prevItem.id,
+      memo: newMemo
+    });
+    if (!updated || updated.ok === false || !updated.title) {
+      watchData[idx] = prevItem;
+      renderWatch();
+      showToast('保存に失敗しました: ' + ((updated && updated.error) || '通信エラー'), true);
+      return;
+    }
+    watchData[idx] = {
+      ...prevItem,
+      ...updated,
+      status: updated.status || prevItem.status,
+      title: updated.title || prevItem.title,
+      memo: updated.memo !== undefined ? updated.memo : newMemo,
+      relatedUrl: updated.relatedUrl !== undefined ? updated.relatedUrl : prevItem.relatedUrl,
+      notionUrl: updated.notionUrl !== undefined ? updated.notionUrl : prevItem.notionUrl,
+    };
+    renderWatch();
+  } catch (err) {
+    watchData[idx] = prevItem;
+    renderWatch();
+    showToast('保存に失敗しました: ' + err.message, true);
+  }
+}
+
+async function saveInlineDiary(row) {
+  const ta = document.getElementById(`inline-ta-diary-${Number(row)}`);
+  if (!ta) return;
+  const newBody = ta.value;
+  const idx = diaryData.findIndex(d => Number(d.row) === Number(row));
+  if (idx < 0) return;
+  const prevEntry = { ...diaryData[idx] };
+  diaryData[idx] = { ...prevEntry, body: newBody };
+  activeInlineEdit = null;
+  renderDiary();
+  showToast('保存しました');
+  try {
+    const res = await apiPost('updateDiary', {
+      row: prevEntry.row,
+      id: prevEntry.id,
+      body: newBody
+    });
+    if (!res || !res.ok) {
+      diaryData[idx] = prevEntry;
+      renderDiary();
+      showToast('保存に失敗しました: ' + ((res && res.error) || '通信エラー'), true);
+      return;
+    }
+    if (res.entry) {
+      diaryData[idx] = res.entry;
+      renderDiary();
+    }
+    if (res.needsDocSync && res.entry) {
+      triggerDiaryDocSyncWithRetry({ row: res.entry.row, id: res.entry.id });
+    }
+  } catch (err) {
+    diaryData[idx] = prevEntry;
+    renderDiary();
+    showToast('保存に失敗しました: ' + err.message, true);
+  }
 }
 
 async function quickUpdate(row, changes) {
@@ -875,19 +1038,31 @@ function buildDiaryCardHtml(d) {
 
   const cleanTitle = String(d.title || '').trim();
   const titleHtml = cleanTitle ? `<h3 class="card-title">${esc(cleanTitle)}</h3>` : '';
+  const rowNum = Number(d.row || 0);
+  const isEditing = activeInlineEdit && activeInlineEdit.type === 'diary' && Number(activeInlineEdit.row) === rowNum;
+  const bodyHtml = isEditing
+    ? `<div class="inline-edit-wrap">
+        <textarea id="inline-ta-diary-${rowNum}" class="inline-edit-ta" oninput="autoResizeTextarea(this, 180)" placeholder="出来事やメモ...">${esc(d.body || '')}</textarea>
+        <div class="inline-edit-actions">
+          <button class="btn-sm primary" onclick="saveInlineDiary(${rowNum})">💾 保存</button>
+          <button class="btn-sm" onclick="cancelInlineEdit()">キャンセル</button>
+          <button class="btn-sm" onclick="openDetailFromInline('diary', ${rowNum}, '${esc(d.id)}')">⚙️ 詳細項目を編集</button>
+        </div>
+      </div>`
+    : `<div class="card-summary editable-text-area" style="white-space:pre-wrap;word-break:break-word;" onclick="startInlineEdit('diary', ${rowNum}, event)">${d.body ? renderRichText(d.body) : '<span style="color:#9ca3af;">タップして本文を追記...</span>'}</div>`;
   return `
-    <div class="card diary-card" id="dcard-${Number(d.row || 0)}">
+    <div class="card diary-card" id="dcard-${rowNum}">
       <div class="card-header">
         <div class="card-date">${esc(formatDiaryDateLabel(d.date, d.weekday))}</div>
         ${titleHtml}
       </div>
       ${locHtml}
       ${mediaHtml}
-      <div class="card-summary" style="white-space:pre-wrap;word-break:break-word;">${renderRichText(d.body)}</div>
+      ${bodyHtml}
       ${mealHtml}
       <div class="card-actions">
-        <button class="btn-sm primary" onclick="openEditDiaryModal(${Number(d.row || 0)}, '${esc(d.id)}')">✏️ 編集</button>
-        <button class="btn-sm success" onclick="quickAnalyzeMeal(${Number(d.row || 0)}, '${esc(d.id)}')">🍽️ 栄養分析</button>
+        <button class="btn-sm primary" onclick="startInlineEdit('diary', ${rowNum})">✏️ 編集</button>
+        <button class="btn-sm success" onclick="quickAnalyzeMeal(${rowNum}, '${esc(d.id)}')">🍽️ 栄養分析</button>
         <button class="btn-sm" onclick="openMealModal('${esc(d.date)}')">＋ 食事追加</button>
       </div>
     </div>`;
