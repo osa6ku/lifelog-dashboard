@@ -275,7 +275,8 @@ function doGet(e) {
     return jsonResponse_({ ok: true, count: entries.length, entries });
   }
   if (api === 'diary') {
-    const limit = Number((e.parameter && e.parameter.limit) || 120);
+    const rawLimit = e.parameter && e.parameter.limit;
+    const limit = rawLimit !== undefined ? Number(rawLimit) : 0;
     const entries = getDiaryEntries(limit);
     return jsonResponse_({ ok: true, count: entries.length, entries });
   }
@@ -296,8 +297,12 @@ function doPost(e) {
     const action = body.action;
     if (action === 'addWatch') return jsonResponse_(addWatchEntry(body.payload || {}));
     if (action === 'updateWatch') return jsonResponse_(updateWatchCard(body.payload || {}));
+    if (action === 'updateWatchFull') return jsonResponse_(updateWatchFull(body.payload || {}));
+    if (action === 'deleteWatch') return jsonResponse_(deleteWatchEntry(body.payload || {}));
     if (action === 'addDiary') return jsonResponse_(addDiaryEntry(body.payload || {}));
     if (action === 'updateDiary') return jsonResponse_(updateDiaryEntry(body.payload || {}));
+    if (action === 'deleteDiary') return jsonResponse_(deleteDiaryEntry(body.payload || {}));
+    if (action === 'analyzeMeal') return jsonResponse_(analyzeMealEntry(body.payload || {}));
     return jsonResponse_({ ok: false, error: 'Unknown action: ' + action });
   } catch (err) {
     return jsonResponse_({ ok: false, error: String(err) });
@@ -377,25 +382,24 @@ function addWatchEntry(payload) {
   return { ok: true, row: insertedRow };
 }
 
-function updateWatchCard(payload) {
-  const ss = SpreadsheetApp.openById(WATCH_SS_ID);
-  const sheet = ss.getSheetByName(SHEET_NAME);
-  const row = Number(payload.row);
-  if (row < 2) throw new Error('Invalid row');
-
-  if (payload.status !== undefined) {
-    sheet.getRange(row, COL.STATUS).setValue(payload.status);
-    if (payload.status === '完了' && !sheet.getRange(row, COL.WATCH_DATE).getValue()) {
-      sheet.getRange(row, COL.WATCH_DATE).setValue(Utilities.formatDate(new Date(), 'Asia/Tokyo', 'yyyy-MM-dd'));
+function resolveRowByIdOrIndex_(sheet, idCol, row, id) {
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 2) return 0;
+  const r = Number(row || 0);
+  if (r >= 2 && r <= lastRow) {
+    if (id === undefined || id === null || id === '' || String(sheet.getRange(r, idCol).getValue()) === String(id)) {
+      return r;
     }
   }
-  if (payload.rating !== undefined) {
-    sheet.getRange(row, COL.RATING).setValue(payload.rating);
+  if (id !== undefined && id !== null && id !== '') {
+    const ids = sheet.getRange(2, idCol, lastRow - 1, 1).getValues();
+    const idx = ids.findIndex(v => String(v[0]) === String(id));
+    if (idx >= 0) return idx + 2;
   }
-  if (payload.runWiki) {
-    enrichRow_(sheet, row);
-  }
-  const r = sheet.getRange(row, 1, 1, 15).getValues()[0];
+  return 0;
+}
+
+function formatWatchRow_(row, r) {
   return {
     row,
     id: r[COL.ID - 1],
@@ -410,6 +414,163 @@ function updateWatchCard(payload) {
     staff: String(r[COL.STAFF - 1] || ''),
     summary: String(r[COL.SUMMARY - 1] || ''),
     memo: String(r[COL.MEMO - 1] || ''),
+    relatedUrl: String(r[COL.RELATED_URL - 1] || ''),
+    notionUrl: String(r[COL.NOTION_URL - 1] || ''),
+  };
+}
+
+function updateWatchCard(payload) {
+  const ss = SpreadsheetApp.openById(WATCH_SS_ID);
+  const sheet = ss.getSheetByName(SHEET_NAME);
+  const row = resolveRowByIdOrIndex_(sheet, COL.ID, payload.row, payload.id);
+  if (row < 2) throw new Error('Watch entry not found');
+
+  if (payload.status !== undefined) {
+    sheet.getRange(row, COL.STATUS).setValue(payload.status);
+    if (payload.status === '完了' && !sheet.getRange(row, COL.WATCH_DATE).getValue()) {
+      sheet.getRange(row, COL.WATCH_DATE).setValue(Utilities.formatDate(new Date(), 'Asia/Tokyo', 'yyyy-MM-dd'));
+    }
+  }
+  if (payload.rating !== undefined) {
+    sheet.getRange(row, COL.RATING).setValue(payload.rating);
+  }
+  if (payload.runWiki) {
+    enrichRow_(sheet, row);
+  }
+  const r = sheet.getRange(row, 1, 1, 15).getValues()[0];
+  return formatWatchRow_(row, r);
+}
+
+function updateWatchFull(payload) {
+  const ss = SpreadsheetApp.openById(WATCH_SS_ID);
+  const sheet = ss.getSheetByName(SHEET_NAME);
+  const row = resolveRowByIdOrIndex_(sheet, COL.ID, payload.row, payload.id);
+  if (row < 2) return { ok: false, error: 'Watch entry not found' };
+
+  const cur = sheet.getRange(row, 1, 1, 15).getValues()[0];
+  const title = payload.title !== undefined ? String(payload.title).trim() : String(cur[COL.TITLE - 1] || '');
+  const memo = payload.memo !== undefined ? String(payload.memo).trim() : String(cur[COL.MEMO - 1] || '');
+  const rawPlat = payload.platform !== undefined ? String(payload.platform) : String(cur[COL.PLATFORM - 1] || '');
+  const normPlat = normalizePlatforms_(rawPlat, `${title} ${memo}`);
+  const status = payload.status !== undefined ? String(payload.status) : String(cur[COL.STATUS - 1] || '');
+  let watchDate = payload.watchDate !== undefined ? String(payload.watchDate || '') : formatDateVal_(cur[COL.WATCH_DATE - 1]);
+  if (status === '完了' && !watchDate) {
+    watchDate = Utilities.formatDate(new Date(), 'Asia/Tokyo', 'yyyy-MM-dd');
+  }
+
+  sheet.getRange(row, COL.TITLE).setValue(title);
+  if (payload.category !== undefined) sheet.getRange(row, COL.CATEGORY).setValue(payload.category);
+  sheet.getRange(row, COL.WATCH_DATE).setValue(watchDate);
+  sheet.getRange(row, COL.STATUS).setValue(status);
+  if (payload.rating !== undefined) sheet.getRange(row, COL.RATING).setValue(payload.rating);
+  sheet.getRange(row, COL.PLATFORM).setValue(normPlat);
+  if (payload.releaseYear !== undefined) sheet.getRange(row, COL.RELEASE_YEAR).setValue(payload.releaseYear);
+  if (payload.cast !== undefined) sheet.getRange(row, COL.CAST).setValue(payload.cast);
+  if (payload.staff !== undefined) sheet.getRange(row, COL.STAFF).setValue(payload.staff);
+  if (payload.summary !== undefined) sheet.getRange(row, COL.SUMMARY).setValue(payload.summary);
+  sheet.getRange(row, COL.MEMO).setValue(memo);
+  if (payload.relatedUrl !== undefined) sheet.getRange(row, COL.RELATED_URL).setValue(payload.relatedUrl);
+
+  if (payload.runWiki) {
+    enrichRow_(sheet, row);
+  }
+  const r = sheet.getRange(row, 1, 1, 15).getValues()[0];
+  return { ok: true, entry: formatWatchRow_(row, r) };
+}
+
+function deleteWatchEntry(payload) {
+  const ss = SpreadsheetApp.openById(WATCH_SS_ID);
+  const sheet = ss.getSheetByName(SHEET_NAME);
+  const row = resolveRowByIdOrIndex_(sheet, COL.ID, payload.row, payload.id);
+  if (row < 2) return { ok: false, error: 'Watch entry not found' };
+  sheet.deleteRow(row);
+  return { ok: true, deletedRow: row };
+}
+
+const DIARY_NUTRITION_HEADERS = ['食事区分', '推定カロリー(kcal)', '栄養バランス(PFC・所見)'];
+
+function getDiaryNutritionCols_(sheet, createIfMissing) {
+  const lastCol = Math.max(13, sheet.getLastColumn());
+  const headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0].map(h => String(h || '').trim());
+  const map = {};
+  let nextCol = lastCol + 1;
+  DIARY_NUTRITION_HEADERS.forEach(name => {
+    const idx = headers.indexOf(name);
+    if (idx >= 0) {
+      map[name] = idx + 1;
+    } else if (createIfMissing) {
+      sheet.getRange(1, nextCol).setValue(name);
+      map[name] = nextCol;
+      nextCol++;
+    } else {
+      map[name] = 0;
+    }
+  });
+  return {
+    mealTypeCol: map['食事区分'],
+    caloriesCol: map['推定カロリー(kcal)'],
+    nutritionCol: map['栄養バランス(PFC・所見)'],
+    totalCols: Math.max(lastCol, nextCol - 1),
+  };
+}
+
+function parseNutritionStr_(raw) {
+  const s = String(raw || '').trim();
+  if (!s) return { protein: '', fat: '', carbs: '', advice: '' };
+  const pm = s.match(/P\s*[:：]?\s*(\d+(?:\.\d+)?)\s*g?/i);
+  const fm = s.match(/F\s*[:：]?\s*(\d+(?:\.\d+)?)\s*g?/i);
+  const cm = s.match(/C\s*[:：]?\s*(\d+(?:\.\d+)?)\s*g?/i);
+  const parts = s.split('|');
+  const advice = parts.length > 1 ? parts.slice(1).join('|').trim() : (pm || fm || cm ? '' : s);
+  return {
+    protein: pm ? Number(pm[1]) : '',
+    fat: fm ? Number(fm[1]) : '',
+    carbs: cm ? Number(cm[1]) : '',
+    advice,
+  };
+}
+
+function formatNutritionStr_(p, f, c, advice) {
+  const pfc = [];
+  if (p !== '' && p !== undefined && p !== null && !isNaN(Number(p))) pfc.push(`P:${Math.round(Number(p))}g`);
+  if (f !== '' && f !== undefined && f !== null && !isNaN(Number(f))) pfc.push(`F:${Math.round(Number(f))}g`);
+  if (c !== '' && c !== undefined && c !== null && !isNaN(Number(c))) pfc.push(`C:${Math.round(Number(c))}g`);
+  const adv = String(advice || '').trim();
+  if (pfc.length > 0 && adv) return `${pfc.join(' ')} | ${adv}`;
+  if (pfc.length > 0) return pfc.join(' ');
+  return adv;
+}
+
+function formatDiaryRow_(row, r, cols) {
+  const imageUrls = String(r[9] || '').split('\n').filter(Boolean);
+  const imageIds = imageUrls.map(u => {
+    const m = u.match(/\/d\/([^/]+)/);
+    return m ? m[1] : '';
+  }).filter(Boolean);
+  const mealType = cols.mealTypeCol ? String(r[cols.mealTypeCol - 1] || '') : '';
+  const rawCal = cols.caloriesCol ? r[cols.caloriesCol - 1] : '';
+  const calories = rawCal !== '' && rawCal !== null && rawCal !== undefined && !isNaN(Number(rawCal)) ? Number(rawCal) : '';
+  const nutritionRaw = cols.nutritionCol ? String(r[cols.nutritionCol - 1] || '') : '';
+  const parsedNut = parseNutritionStr_(nutritionRaw);
+
+  return {
+    row,
+    id: r[0],
+    date: formatDateVal_(r[1]),
+    weekday: String(r[2] || ''),
+    title: String(r[4] || ''),
+    body: String(r[5] || ''),
+    location: String(r[6] || ''),
+    imageCount: Number(r[7] || 0),
+    imageUrls,
+    imageIds,
+    mealType,
+    calories,
+    protein: parsedNut.protein,
+    fat: parsedNut.fat,
+    carbs: parsedNut.carbs,
+    nutritionAdvice: parsedNut.advice,
+    nutritionRaw,
   };
 }
 
@@ -419,29 +580,12 @@ function getDiaryEntries(limit) {
   const lastRow = sheet.getLastRow();
   if (lastRow < 2) return [];
 
-  const maxCount = limit || 120;
-  const startRow = Math.max(2, lastRow - maxCount + 1);
-  const values = sheet.getRange(startRow, 1, lastRow - startRow + 1, 13).getValues();
+  const cols = getDiaryNutritionCols_(sheet, false);
+  const startRow = limit && limit > 0 ? Math.max(2, lastRow - limit + 1) : 2;
+  const values = sheet.getRange(startRow, 1, lastRow - startRow + 1, cols.totalCols).getValues();
   const out = [];
   for (let i = values.length - 1; i >= 0; i--) {
-    const r = values[i];
-    const imageUrls = String(r[9] || '').split('\n').filter(Boolean);
-    const imageIds = imageUrls.map(u => {
-      const m = u.match(/\/d\/([^/]+)/);
-      return m ? m[1] : '';
-    }).filter(Boolean);
-    out.push({
-      row: startRow + i,
-      id: r[0],
-      date: formatDateVal_(r[1]),
-      weekday: String(r[2] || ''),
-      title: String(r[4] || ''),
-      body: String(r[5] || ''),
-      location: String(r[6] || ''),
-      imageCount: Number(r[7] || 0),
-      imageUrls,
-      imageIds,
-    });
+    out.push(formatDiaryRow_(startRow + i, values[i], cols));
   }
   return out;
 }
@@ -487,6 +631,25 @@ function saveDiaryPhotos_(dateStr, photos) {
   return { jpgNames, driveUrls, firstFileId };
 }
 
+function writeDiaryNutritionCols_(sheet, row, payload) {
+  const hasAny = payload.mealType !== undefined || payload.calories !== undefined ||
+    payload.protein !== undefined || payload.fat !== undefined || payload.carbs !== undefined ||
+    payload.nutritionAdvice !== undefined;
+  if (!hasAny) return;
+  const cols = getDiaryNutritionCols_(sheet, true);
+  if (payload.mealType !== undefined && cols.mealTypeCol) {
+    sheet.getRange(row, cols.mealTypeCol).setValue(String(payload.mealType || '').trim());
+  }
+  if (payload.calories !== undefined && cols.caloriesCol) {
+    const calVal = payload.calories === '' || payload.calories === null ? '' : Number(payload.calories);
+    sheet.getRange(row, cols.caloriesCol).setValue(isNaN(calVal) ? '' : calVal);
+  }
+  if ((payload.protein !== undefined || payload.fat !== undefined || payload.carbs !== undefined || payload.nutritionAdvice !== undefined) && cols.nutritionCol) {
+    const nutStr = formatNutritionStr_(payload.protein, payload.fat, payload.carbs, payload.nutritionAdvice);
+    sheet.getRange(row, cols.nutritionCol).setValue(nutStr);
+  }
+}
+
 function addDiaryEntry(payload) {
   const dateStr = payload.date || Utilities.formatDate(new Date(), 'Asia/Tokyo', 'yyyy-MM-dd');
   const year = dateStr.slice(0, 4);
@@ -521,6 +684,8 @@ function addDiaryEntry(payload) {
     docUrl,
     'webapp_entry',
   ]);
+  const insertedRow = sheet.getLastRow();
+  writeDiaryNutritionCols_(sheet, insertedRow, payload);
 
   // 年別ドキュメントへ追記
   if (docId) {
@@ -528,7 +693,7 @@ function addDiaryEntry(payload) {
     const docBody = doc.getBody();
     const hText = `${dateStr} (${weekday}) — ${title || '(無題)'}`;
     docBody.appendParagraph(hText).setHeading(DocumentApp.ParagraphHeading.HEADING2);
-    if (location) docBody.appendParagraph(`📍 場所: ${location}`);
+    if (location) docBody.appendParagraph(`📍 場所: ${location.split('\n').join(' → ')}`);
     if (body) docBody.appendParagraph(body);
     driveUrls.forEach((u, idx) => {
       const p = docBody.appendParagraph(`📷 写真: ${jpgNames[idx]}`);
@@ -538,26 +703,14 @@ function addDiaryEntry(payload) {
     doc.saveAndClose();
   }
 
-  return { ok: true, id: nextId, date: dateStr };
+  return { ok: true, id: nextId, row: insertedRow, date: dateStr };
 }
 
 function updateDiaryEntry(payload) {
   const ss = SpreadsheetApp.openById(DIARY_SS_ID);
   const sheet = ss.getSheetByName(DIARY_SHEET_NAME);
-  const lastRow = sheet.getLastRow();
-  if (lastRow < 2) return { ok: false, error: 'No diary entries' };
-
-  let row = Number(payload.row || 0);
-  const targetId = payload.id;
-  const isRowValid = row >= 2 && row <= lastRow &&
-    (targetId === undefined || targetId === null || String(sheet.getRange(row, 1).getValue()) === String(targetId));
-
-  if (!isRowValid && targetId !== undefined && targetId !== null) {
-    const ids = sheet.getRange(2, 1, lastRow - 1, 1).getValues();
-    const idx = ids.findIndex(r => String(r[0]) === String(targetId));
-    row = idx >= 0 ? idx + 2 : 0;
-  }
-  if (row < 2 || row > lastRow) return { ok: false, error: 'Diary entry not found' };
+  const row = resolveRowByIdOrIndex_(sheet, 1, payload.row, payload.id);
+  if (row < 2) return { ok: false, error: 'Diary entry not found' };
 
   const cur = sheet.getRange(row, 1, 1, 13).getValues()[0];
   const oldDate = formatDateVal_(cur[1]);
@@ -575,20 +728,33 @@ function updateDiaryEntry(payload) {
   sheet.getRange(row, 6).setValue(body);
   sheet.getRange(row, 7).setValue(location);
 
-  // 追加写真がある場合のみ既存リストに追記
+  // 既存写真の削除＋新規写真の追加
+  const removeSet = new Set((payload.removeUrls || []).map(String));
+  const prevNames = String(cur[8] || '').split('\n').filter(Boolean);
+  const prevUrls = String(cur[9] || '').split('\n').filter(Boolean);
+  const keptNames = [];
+  const keptUrls = [];
+  prevUrls.forEach((u, idx) => {
+    if (!removeSet.has(u)) {
+      keptUrls.push(u);
+      keptNames.push(prevNames[idx] || `photo_${idx + 1}.jpg`);
+    }
+  });
+
   const added = saveDiaryPhotos_(dateStr, payload.photos || []);
-  if (added.jpgNames.length > 0) {
-    const prevNames = String(cur[8] || '').split('\n').filter(Boolean);
-    const prevUrls = String(cur[9] || '').split('\n').filter(Boolean);
-    const allNames = [...prevNames, ...added.jpgNames];
-    const allUrls = [...prevUrls, ...added.driveUrls];
+  const allNames = [...keptNames, ...added.jpgNames];
+  const allUrls = [...keptUrls, ...added.driveUrls];
+
+  if (removeSet.size > 0 || added.jpgNames.length > 0) {
     sheet.getRange(row, 8).setValue(allNames.length);
     sheet.getRange(row, 9).setValue(allNames.join('\n'));
     sheet.getRange(row, 10).setValue(allUrls.join('\n'));
-    if (!cur[10] && added.firstFileId) {
-      sheet.getRange(row, 11).setValue(`=IMAGE("https://drive.google.com/uc?export=view&id=${added.firstFileId}")`);
-    }
+    const firstIdMatch = (allUrls[0] || '').match(/\/d\/([^/]+)/);
+    const formula = firstIdMatch ? `=IMAGE("https://drive.google.com/uc?export=view&id=${firstIdMatch[1]}")` : '';
+    sheet.getRange(row, 11).setValue(formula);
   }
+
+  writeDiaryNutritionCols_(sheet, row, payload);
 
   const editedStamp = Utilities.formatDate(new Date(), 'Asia/Tokyo', 'yyyy-MM-dd HH:mm');
   sheet.getRange(row, 13).setValue(`edited ${editedStamp}`);
@@ -600,29 +766,22 @@ function updateDiaryEntry(payload) {
     // Doc同期が失敗してもスプレッドシートの保存結果は維持する
   }
 
-  const updated = sheet.getRange(row, 1, 1, 13).getValues()[0];
-  const imageUrls = String(updated[9] || '').split('\n').filter(Boolean);
-  const imageIds = imageUrls.map(u => {
-    const m = u.match(/\/d\/([^/]+)/);
-    return m ? m[1] : '';
-  }).filter(Boolean);
-
+  const cols = getDiaryNutritionCols_(sheet, false);
+  const updated = sheet.getRange(row, 1, 1, cols.totalCols).getValues()[0];
   return {
     ok: true,
     docSynced,
-    entry: {
-      row,
-      id: updated[0],
-      date: formatDateVal_(updated[1]),
-      weekday: String(updated[2] || ''),
-      title: String(updated[4] || ''),
-      body: String(updated[5] || ''),
-      location: String(updated[6] || ''),
-      imageCount: Number(updated[7] || 0),
-      imageUrls,
-      imageIds,
-    },
+    entry: formatDiaryRow_(row, updated, cols),
   };
+}
+
+function deleteDiaryEntry(payload) {
+  const ss = SpreadsheetApp.openById(DIARY_SS_ID);
+  const sheet = ss.getSheetByName(DIARY_SHEET_NAME);
+  const row = resolveRowByIdOrIndex_(sheet, 1, payload.row, payload.id);
+  if (row < 2) return { ok: false, error: 'Diary entry not found' };
+  sheet.deleteRow(row);
+  return { ok: true, deletedRow: row };
 }
 
 function syncDiaryDocUpdate_(oldDate, oldTitle, newDate, newWeekday, newTitle, newLocation, newBody) {
@@ -683,7 +842,7 @@ function syncDiaryDocUpdate_(oldDate, oldTitle, newDate, newWeekday, newTitle, n
 
   let insertAt = headingIdx + 1;
   if (newLocation) {
-    docBody.insertParagraph(insertAt, `📍 場所: ${newLocation}`);
+    docBody.insertParagraph(insertAt, `📍 場所: ${newLocation.split('\n').join(' → ')}`);
     insertAt++;
   }
   if (newBody) {
@@ -706,4 +865,172 @@ function formatDateVal_(val) {
     return Utilities.formatDate(val, 'Asia/Tokyo', 'yyyy-MM-dd');
   }
   return String(val).slice(0, 10);
+}
+
+// ============================================================================
+// 食事カロリー＆栄養バランス（PFC）分析 API
+// ============================================================================
+
+const MEAL_NUTRITION_DICT = [
+  { kw: /ラーメン|らーめん|つけ麺|中華そば/, kcal: 680, p: 24, f: 22, c: 92, label: 'ラーメン類' },
+  { kw: /カレー|カツカレー/, kcal: 780, p: 20, f: 26, c: 110, label: 'カレー' },
+  { kw: /牛丼|豚丼|親子丼|カツ丼|天丼|海鮮丼|丼/, kcal: 720, p: 26, f: 22, c: 98, label: '丼もの' },
+  { kw: /寿司|すし|回転寿司|握り/, kcal: 560, p: 28, f: 10, c: 82, label: '寿司' },
+  { kw: /パスタ|スパゲッティ|カルボナーラ|ペペロンチーノ|ボロネーゼ/, kcal: 650, p: 22, f: 20, c: 88, label: 'パスタ' },
+  { kw: /うどん|そば|蕎麦|フォー/, kcal: 420, p: 14, f: 6, c: 76, label: '麺類(うどん/そば/フォー)' },
+  { kw: /定食|ランチセット|御膳/, kcal: 700, p: 28, f: 22, c: 90, label: '定食' },
+  { kw: /ハンバーグ|ステーキ/, kcal: 640, p: 32, f: 34, c: 45, label: '肉料理(ハンバーグ/ステーキ)' },
+  { kw: /唐揚げ|からあげ|とんかつ|トンカツ|フライ|天ぷら/, kcal: 620, p: 24, f: 34, c: 52, label: '揚げ物' },
+  { kw: /焼肉|焼き肉|しゃぶしゃぶ|すき焼き/, kcal: 820, p: 38, f: 48, c: 48, label: '焼肉・鍋' },
+  { kw: /焼き魚|焼魚|刺身|さしみ|サバ|鮭/, kcal: 360, p: 28, f: 14, c: 28, label: '魚料理' },
+  { kw: /ピザ|ハンバーガー|バーガー|ポテト/, kcal: 720, p: 24, f: 32, c: 82, label: 'ファストフード/ピザ' },
+  { kw: /チャーハン|炒飯|餃子|ギョウザ|中華/, kcal: 680, p: 22, f: 26, c: 85, label: '中華' },
+  { kw: /弁当|お弁当/, kcal: 650, p: 22, f: 20, c: 92, label: '弁当' },
+  { kw: /おにぎり|おむすび/, kcal: 190, p: 4, f: 1, c: 40, label: 'おにぎり' },
+  { kw: /パン|トースト|サンドイッチ|クロワッサン|ベーグル/, kcal: 320, p: 10, f: 12, c: 44, label: 'パン類' },
+  { kw: /ご飯|ごはん|白米|ライス/, kcal: 250, p: 4, f: 1, c: 55, label: 'ご飯' },
+  { kw: /サラダ|野菜/, kcal: 110, p: 3, f: 6, c: 10, label: 'サラダ・野菜' },
+  { kw: /味噌汁|みそ汁|スープ/, kcal: 65, p: 4, f: 2, c: 7, label: '汁物' },
+  { kw: /卵|たまご|目玉焼き|オムレツ|ゆで卵/, kcal: 120, p: 8, f: 8, c: 1, label: '卵料理' },
+  { kw: /納豆|豆腐|冷奴/, kcal: 110, p: 9, f: 5, c: 6, label: '大豆食品' },
+  { kw: /ヨーグルト|チーズ|牛乳|ミルク/, kcal: 120, p: 6, f: 6, c: 9, label: '乳製品' },
+  { kw: /ケーキ|スイーツ|アイス|チョコ|デザート|プリン/, kcal: 310, p: 4, f: 16, c: 38, label: 'スイーツ' },
+  { kw: /ビール|生ビール|ハイボール|チューハイ|酒|ワイン|日本酒/, kcal: 160, p: 1, f: 0, c: 8, label: 'アルコール' },
+  { kw: /コーヒー|珈琲|カフェラテ|ラテ|紅茶/, kcal: 45, p: 2, f: 2, c: 5, label: 'カフェ飲料' },
+];
+
+function estimateMealByDictionary_(text, mealTypeHint) {
+  const src = String(text || '');
+  let kcal = 0, p = 0, f = 0, c = 0;
+  const hits = [];
+
+  MEAL_NUTRITION_DICT.forEach(item => {
+    if (item.kw.test(src)) {
+      kcal += item.kcal;
+      p += item.p;
+      f += item.f;
+      c += item.c;
+      hits.push(item.label);
+    }
+  });
+
+  if (hits.length === 0) {
+    kcal = 550; p = 20; f = 18; c = 72;
+    hits.push('標準的な1食として推定');
+  }
+
+  let mealType = String(mealTypeHint || '').trim();
+  if (!mealType) {
+    if (/朝食|朝ごはん|モーニング/.test(src)) mealType = '朝食';
+    else if (/夕食|夜ごはん|晩ごはん|ディナー/.test(src)) mealType = '夕食';
+    else if (/間食|おやつ|カフェ|スイーツ/.test(src)) mealType = '間食';
+    else if (/昼食|ランチ|昼ごはん/.test(src)) mealType = '昼食';
+    else mealType = '昼食';
+  }
+
+  const totalEnergy = p * 4 + f * 9 + c * 4 || 1;
+  const pPct = Math.round((p * 4 / totalEnergy) * 100);
+  const fPct = Math.round((f * 9 / totalEnergy) * 100);
+  const cPct = Math.round((c * 4 / totalEnergy) * 100);
+
+  const notes = [];
+  if (pPct < 13) notes.push('タンパク質がやや少なめ（肉・魚・卵・大豆の追加推奨）');
+  if (fPct > 32) notes.push('脂質がやや高め');
+  if (!/サラダ|野菜|味噌汁|スープ/.test(src)) notes.push('野菜・食物繊維を添えるとよりバランス良好');
+  if (notes.length === 0) notes.push('PFCバランスは概ね良好');
+
+  return {
+    source: 'dictionary',
+    mealType,
+    calories: Math.round(kcal),
+    protein: Math.round(p),
+    fat: Math.round(f),
+    carbs: Math.round(c),
+    advice: `${hits.slice(0, 3).join('・')}から推定（P${pPct}%/F${fPct}%/C${cPct}%）。${notes.join('。')}`,
+  };
+}
+
+function estimateMealWithGemini_(apiKey, title, body, imageIds, mealTypeHint) {
+  const parts = [{
+    text: `以下の日記（タイトル・本文・添付写真）から食事内容を判定し、合計の推定摂取カロリー(kcal)、タンパク質(g)、脂質(g)、炭水化物(g)、食事区分（朝食/昼食/夕食/間食/1日まとめ のいずれか）、短い栄養バランス所見（日本語60文字以内）をJSONのみ（マークダウン記号なし）で返してください。\nタイトル: ${title}\n本文: ${body}\n食事区分ヒント: ${mealTypeHint || '自動判定'}\n出力形式: {"mealType":"昼食","calories":650,"protein":25,"fat":20,"carbs":85,"advice":"..."}`
+  }];
+
+  (imageIds || []).slice(0, 2).forEach(fid => {
+    try {
+      const file = DriveApp.getFileById(fid);
+      const blob = file.getThumbnail() || file.getBlob();
+      parts.push({
+        inlineData: {
+          mimeType: blob.getContentType() || 'image/jpeg',
+          data: Utilities.base64Encode(blob.getBytes()),
+        },
+      });
+    } catch (e) { /* skip image */ }
+  });
+
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${encodeURIComponent(apiKey)}`;
+  const res = UrlFetchApp.fetch(url, {
+    method: 'post',
+    contentType: 'application/json',
+    payload: JSON.stringify({ contents: [{ parts }] }),
+    muteHttpExceptions: true,
+  });
+  if (res.getResponseCode() !== 200) return null;
+
+  const json = JSON.parse(res.getContentText());
+  const txt = (json.candidates && json.candidates[0] && json.candidates[0].content && json.candidates[0].content.parts && json.candidates[0].content.parts[0] && json.candidates[0].content.parts[0].text) || '';
+  const m = txt.match(/\{[\s\S]*\}/);
+  if (!m) return null;
+  const parsed = JSON.parse(m[0]);
+  return {
+    source: 'gemini',
+    mealType: String(parsed.mealType || mealTypeHint || '昼食'),
+    calories: Math.round(Number(parsed.calories || 0)),
+    protein: Math.round(Number(parsed.protein || 0)),
+    fat: Math.round(Number(parsed.fat || 0)),
+    carbs: Math.round(Number(parsed.carbs || 0)),
+    advice: String(parsed.advice || ''),
+  };
+}
+
+function analyzeMealEntry(payload) {
+  const title = String(payload.title || '').trim();
+  const body = String(payload.body || '').trim();
+  const imageIds = payload.imageIds || [];
+  const mealTypeHint = String(payload.mealType || '').trim();
+  const apiKey = PropertiesService.getScriptProperties().getProperty('GEMINI_API_KEY');
+
+  let result = null;
+  if (apiKey) {
+    try {
+      result = estimateMealWithGemini_(apiKey, title, body, imageIds, mealTypeHint);
+    } catch (e) {
+      result = null;
+    }
+  }
+  if (!result) {
+    result = estimateMealByDictionary_(`${title}\n${body}`, mealTypeHint);
+  }
+
+  let updatedEntry = null;
+  if (payload.save && (payload.row || payload.id !== undefined)) {
+    const ss = SpreadsheetApp.openById(DIARY_SS_ID);
+    const sheet = ss.getSheetByName(DIARY_SHEET_NAME);
+    const row = resolveRowByIdOrIndex_(sheet, 1, payload.row, payload.id);
+    if (row >= 2) {
+      writeDiaryNutritionCols_(sheet, row, {
+        mealType: result.mealType,
+        calories: result.calories,
+        protein: result.protein,
+        fat: result.fat,
+        carbs: result.carbs,
+        nutritionAdvice: result.advice,
+      });
+      const cols = getDiaryNutritionCols_(sheet, false);
+      const updated = sheet.getRange(row, 1, 1, cols.totalCols).getValues()[0];
+      updatedEntry = formatDiaryRow_(row, updated, cols);
+    }
+  }
+
+  return { ok: true, analysis: result, entry: updatedEntry };
 }

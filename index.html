@@ -9,7 +9,7 @@
   <link rel="manifest" href="./manifest.json">
   <link rel="apple-touch-icon" href="./apple-touch-icon.png">
   <link rel="icon" type="image/png" href="./icon-192.png">
-  <title>ライフログ・ダッシュボード v1.3.0</title>
+  <title>ライフログ・ダッシュボード v1.4.0</title>
   <style>
     :root {
       --bg: #f4f6f9;
@@ -108,7 +108,7 @@
     .bottom-nav {
       position: fixed; bottom: 0; left: 0; right: 0; z-index: 30;
       background: #fff; border-top: 1px solid var(--border);
-      display: grid; grid-template-columns: 1fr 1fr; height: 60px;
+      display: grid; grid-template-columns: 1fr 1fr 1fr; height: 60px;
     }
     .nav-btn {
       border: none; background: none; font-size: 13px; font-weight: 700;
@@ -167,6 +167,55 @@
     .loc-item-main { font-size: 13px; font-weight: 600; color: var(--text); }
     .loc-item-sub { font-size: 11px; color: var(--muted); }
     .loc-item-dist { font-size: 11px; color: var(--primary); font-weight: 600; white-space: nowrap; }
+    .loc-badge {
+      display: inline-flex; align-items: center; gap: 3px;
+      background: #eff6ff; color: #1d4ed8; border: 1px solid #bfdbfe;
+      padding: 2px 8px; border-radius: 999px; font-size: 12px; font-weight: 600;
+      text-decoration: none;
+    }
+    .loc-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 6px; }
+    .loc-chip {
+      display: inline-flex; align-items: center; gap: 4px;
+      background: #e0f2fe; color: #0369a1; border: 1px solid #bae6fd;
+      padding: 4px 8px; border-radius: 999px; font-size: 12px; font-weight: 600;
+    }
+    .loc-chip button {
+      border: none; background: none; color: #0369a1; cursor: pointer;
+      padding: 0 2px; font-size: 12px; font-weight: 700;
+    }
+    .edit-photo-list { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
+    .edit-photo-item { position: relative; width: 76px; height: 76px; }
+    .edit-photo-item img {
+      width: 100%; height: 100%; object-fit: cover; border-radius: 8px; border: 1px solid var(--border);
+    }
+    .edit-photo-item.removed img { opacity: 0.25; filter: grayscale(1); }
+    .edit-photo-del {
+      position: absolute; top: -6px; right: -6px; width: 22px; height: 22px;
+      border-radius: 50%; border: none; background: #ef4444; color: #fff;
+      font-size: 11px; font-weight: 700; cursor: pointer;
+    }
+    .meal-box {
+      background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 10px;
+      padding: 10px; margin-bottom: 12px;
+    }
+    .meal-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .pfc-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px; margin-top: 8px; }
+    .meal-badge {
+      display: inline-flex; align-items: center; gap: 4px; flex-wrap: wrap;
+      background: #ecfdf5; color: #047857; border: 1px solid #a7f3d0;
+      padding: 3px 8px; border-radius: 8px; font-size: 12px; font-weight: 600; margin-top: 6px;
+    }
+    .nut-bar-row { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; font-size: 12px; }
+    .nut-bar-label { width: 78px; color: var(--muted); font-weight: 600; }
+    .nut-bar-track { flex: 1; height: 14px; background: #e5e7eb; border-radius: 999px; overflow: hidden; }
+    .nut-bar-fill { height: 100%; background: var(--accent); border-radius: 999px; transition: width .3s; }
+    .nut-bar-val { width: 64px; text-align: right; font-weight: 700; }
+    .pfc-ratio-bar { display: flex; height: 14px; border-radius: 999px; overflow: hidden; margin: 8px 0; background: #e5e7eb; }
+    .btn-danger {
+      background: #fef2f2; color: #dc2626; border: 1px solid #fecaca;
+      border-radius: 10px; padding: 10px; font-size: 13px; font-weight: 700; cursor: pointer; width: 100%; margin-top: 8px;
+    }
+    details summary { cursor: pointer; font-size: 13px; font-weight: 700; color: var(--primary); margin-bottom: 8px; }
   </style>
 </head>
 <body>
@@ -174,7 +223,7 @@
   <div class="header-top">
     <h1 class="app-title">📚 ライフログ・ダッシュボード</h1>
     <div class="header-right">
-      <span class="ver-badge" id="app-version">v1.3.0</span>
+      <span class="ver-badge" id="app-version">v1.4.0</span>
       <button class="btn-sm" id="btn-check-update" onclick="manualCheckUpdate()" title="最新バージョン確認・更新">🔄 更新</button>
     </div>
   </div>
@@ -229,26 +278,55 @@
     </div>
     <div class="count-bar" id="diary-count">読み込み中...</div>
     <div id="diary-list"><div class="loading">日記を読み込んでいます...</div></div>
+    <div id="diary-more-wrap" style="text-align:center;margin:12px 0;display:none;">
+      <button class="btn-sm primary" onclick="showMoreDiary()">もっと読み込む</button>
+    </div>
+  </section>
+
+  <section id="view-nutrition" style="display:none;">
+    <div class="card">
+      <div class="card-head">
+        <div class="card-title">🍽️ 直近7日間のカロリー・栄養サマリー</div>
+        <button class="btn-sm" onclick="loadDiaryData(true)">🔄 再読込</button>
+      </div>
+      <div id="nutrition-summary" style="margin-top:10px;"><div class="loading">集計中...</div></div>
+    </div>
+    <div class="count-bar" id="nutrition-count">食事ログ読み込み中...</div>
+    <div id="nutrition-list"></div>
   </section>
 </main>
 
 <nav class="bottom-nav">
   <button class="nav-btn active" id="nav-watch" onclick="switchTab('watch')"><span>🎬</span><span>鑑賞記録</span></button>
-  <button class="nav-btn" id="nav-diary" onclick="switchTab('diary')"><span>📓</span><span>日記タイムライン</span></button>
+  <button class="nav-btn" id="nav-diary" onclick="switchTab('diary')"><span>📓</span><span>日記</span></button>
+  <button class="nav-btn" id="nav-nutrition" onclick="switchTab('nutrition')"><span>🍽️</span><span>食事・栄養</span></button>
 </nav>
 
 <div class="modal-backdrop" id="modal-watch">
   <div class="modal">
-    <div class="modal-title"><span>🎬 鑑賞記録を追加</span><button class="btn-sm" onclick="closeModals()">✕</button></div>
+    <div class="modal-title"><span id="watch-modal-title">🎬 鑑賞記録を追加</span><button class="btn-sm" onclick="closeModals()">✕</button></div>
     <div class="field"><label>タイトル *</label><input id="w-title" placeholder="例: ドラマ『...』"></div>
-    <div class="field"><label>区分</label><select id="w-cat"><option value="ドラマ">ドラマ</option><option value="映画">映画</option><option value="アニメ">アニメ</option><option value="本">本</option><option value="その他">その他</option></select></div>
+    <div class="meal-grid">
+      <div class="field"><label>区分</label><select id="w-cat"><option value="ドラマ">ドラマ</option><option value="映画">映画</option><option value="アニメ">アニメ</option><option value="本">本</option><option value="その他">その他</option></select></div>
+      <div class="field"><label>ステータス</label><select id="w-status"><option value="進行中" selected>進行中</option><option value="完了">完了</option><option value="未着手">未着手</option></select></div>
+    </div>
+    <div class="meal-grid">
+      <div class="field"><label>評価（1〜5）</label><select id="w-rating"><option value="">未評価</option><option value="5">★★★★★ (5)</option><option value="4">★★★★ (4)</option><option value="3">★★★ (3)</option><option value="2">★★ (2)</option><option value="1">★ (1)</option></select></div>
+      <div class="field"><label>鑑賞日</label><input id="w-date" type="date"></div>
+    </div>
     <div class="field"><label>プラットフォーム（カンマ区切り可）</label><input id="w-plat" placeholder="例: Netflix, 映画館, TBS"></div>
-    <div class="field"><label>ステータス</label><select id="w-status"><option value="進行中" selected>進行中</option><option value="完了">完了</option><option value="未着手">未着手</option></select></div>
-    <div class="field"><label>評価（1〜5）</label><select id="w-rating"><option value="">未評価</option><option value="5">★★★★★ (5)</option><option value="4">★★★★ (4)</option><option value="3">★★★ (3)</option><option value="2">★★ (2)</option><option value="1">★ (1)</option></select></div>
-    <div class="field"><label>鑑賞日</label><input id="w-date" type="date"></div>
     <div class="field"><label>メモ・感想</label><textarea id="w-memo" rows="3"></textarea></div>
-    <div class="field"><label><input type="checkbox" id="w-wiki" checked style="width:auto;"> 登録時にWikipediaからキャスト・概要を自動補完する</label></div>
+    <details id="watch-extra-details">
+      <summary>詳細項目（公開年・キャスト・スタッフ・概要・URL）</summary>
+      <div class="field"><label>公開年・放送年</label><input id="w-year" placeholder="例: 2026"></div>
+      <div class="field"><label>出演者（キャスト）</label><textarea id="w-cast" rows="2"></textarea></div>
+      <div class="field"><label>監督・脚本・スタッフ</label><input id="w-staff"></div>
+      <div class="field"><label>作品概要</label><textarea id="w-summary" rows="3"></textarea></div>
+      <div class="field"><label>関連URL</label><input id="w-url" type="url" placeholder="https://..."></div>
+    </details>
+    <div class="field"><label><input type="checkbox" id="w-wiki" checked style="width:auto;"> <span id="w-wiki-label">登録時にWikipediaからキャスト・概要を自動補完する</span></label></div>
     <button class="btn-big btn-watch" style="width:100%;" id="btn-save-watch" onclick="submitWatch()">保存する</button>
+    <button class="btn-danger" id="btn-delete-watch" style="display:none;" onclick="deleteCurrentWatch()">🗑️ この鑑賞記録を削除</button>
   </div>
 </div>
 
@@ -258,9 +336,11 @@
     <div class="field"><label>日付</label><input id="d-date" type="date"></div>
     <div class="field"><label>タイトル</label><input id="d-title" placeholder="今日のタイトル"></div>
     <div class="field">
-      <label>場所・位置情報</label>
+      <label>場所・位置情報（複数スポット追加可）</label>
+      <div id="d-loc-chips" class="loc-chips"></div>
       <div class="loc-row">
-        <input id="d-loc" placeholder="例: 自宅、渋谷など（入力して🔍または📍現在地）" onkeydown="if(event.key==='Enter'){event.preventDefault();searchLocationByKeyword();}">
+        <input id="d-loc" placeholder="場所名を入力して ＋ / 🔍 / 📍" onkeydown="if(event.key==='Enter'){event.preventDefault();addLocationFromInput();}">
+        <button type="button" class="btn-icon" onclick="addLocationFromInput()" title="入力した場所を追加">＋</button>
         <button type="button" class="btn-icon" id="btn-loc-gps" onclick="fetchNearbyLocations()" title="現在地から周辺スポットを取得">📍</button>
         <button type="button" class="btn-icon" id="btn-loc-search" onclick="searchLocationByKeyword()" title="キーワードで場所を検索">🔍</button>
       </div>
@@ -268,8 +348,45 @@
       <div id="loc-suggestions" class="loc-suggestions" style="display:none;"></div>
     </div>
     <div class="field"><label>本文 *</label><textarea id="d-body" rows="5" placeholder="出来事やメモ..."></textarea></div>
-    <div class="field"><label id="d-photos-label">写真（自動で1200px以下にリサイズしてDrive保存）</label><input id="d-photos" type="file" accept="image/*" multiple></div>
+    <div class="meal-box">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+        <strong style="font-size:13px;color:#047857;">🍽️ 食事・栄養ログ（任意）</strong>
+        <button type="button" class="btn-sm success" id="btn-analyze-meal" onclick="analyzeMealInModal()">✨ 本文・写真から自動分析</button>
+      </div>
+      <div class="meal-grid">
+        <div class="field" style="margin-bottom:6px;">
+          <label>食事区分</label>
+          <select id="d-meal-type">
+            <option value="">記録なし</option>
+            <option value="朝食">朝食</option>
+            <option value="昼食">昼食</option>
+            <option value="夕食">夕食</option>
+            <option value="間食">間食</option>
+            <option value="1日まとめ">1日まとめ</option>
+          </select>
+        </div>
+        <div class="field" style="margin-bottom:6px;">
+          <label>推定カロリー (kcal)</label>
+          <input id="d-cal" type="number" min="0" placeholder="例: 650">
+        </div>
+      </div>
+      <div class="pfc-grid">
+        <div class="field" style="margin-bottom:6px;"><label>P たんぱく質(g)</label><input id="d-p" type="number" min="0" placeholder="g"></div>
+        <div class="field" style="margin-bottom:6px;"><label>F 脂質(g)</label><input id="d-f" type="number" min="0" placeholder="g"></div>
+        <div class="field" style="margin-bottom:6px;"><label>C 炭水化物(g)</label><input id="d-c" type="number" min="0" placeholder="g"></div>
+      </div>
+      <div class="field" style="margin-bottom:0;">
+        <label>栄養バランス所見・メモ</label>
+        <input id="d-nut-advice" placeholder="自動分析またはメモを入力">
+      </div>
+    </div>
+    <div class="field">
+      <label id="d-photos-label">写真（自動で1200px以下にリサイズしてDrive保存）</label>
+      <div id="d-existing-photos" class="edit-photo-list"></div>
+      <input id="d-photos" type="file" accept="image/*" multiple>
+    </div>
     <button class="btn-big btn-diary" style="width:100%;" id="btn-save-diary" onclick="submitDiary()">日記を保存する</button>
+    <button class="btn-danger" id="btn-delete-diary" style="display:none;" onclick="deleteCurrentDiary()">🗑️ この日記を削除</button>
   </div>
 </div>
 
@@ -284,12 +401,16 @@
 </div>
 
 <script>
-const APP_VERSION = 'v1.3.0';
+const APP_VERSION = 'v1.4.0';
 const GAS_API_URL = 'https://script.google.com/macros/s/AKfycbxLecFd_9FWeR-2w2ThU5SYS7es-0IVKODoLWYgDJGfsoiQzsSRF9IFMAhtZTPl17CDKw/exec';
 
 let watchData = [];
 let diaryData = [];
+let editingWatch = null;
 let editingDiary = null;
+let diaryLocations = [];
+let removedPhotoUrls = new Set();
+let diaryDisplayLimit = 80;
 let statusFilter = '進行中';
 let catFilter = 'ALL';
 let platFilter = 'ALL';
@@ -350,9 +471,18 @@ async function forceAppUpdate() {
 function switchTab(tab) {
   document.getElementById('view-watch').style.display = tab === 'watch' ? 'block' : 'none';
   document.getElementById('view-diary').style.display = tab === 'diary' ? 'block' : 'none';
+  document.getElementById('view-nutrition').style.display = tab === 'nutrition' ? 'block' : 'none';
   document.getElementById('nav-watch').classList.toggle('active', tab === 'watch');
   document.getElementById('nav-diary').classList.toggle('active', tab === 'diary');
-  if (tab === 'diary' && diaryData.length === 0) loadDiaryData();
+  document.getElementById('nav-nutrition').classList.toggle('active', tab === 'nutrition');
+  if (tab === 'diary') {
+    if (diaryData.length === 0) loadDiaryData();
+    else renderDiary();
+  }
+  if (tab === 'nutrition') {
+    if (diaryData.length === 0) loadDiaryData().then(() => renderNutritionView());
+    else renderNutritionView();
+  }
 }
 
 async function apiGet(params) {
@@ -375,10 +505,13 @@ async function loadWatchData() {
   renderWatch();
 }
 
-async function loadDiaryData() {
-  const data = await apiGet({ api: 'diary', limit: '150' });
+async function loadDiaryData(forceRenderNut) {
+  const data = await apiGet({ api: 'diary', limit: '0' });
   diaryData = data.entries || [];
   renderDiary();
+  if (forceRenderNut || document.getElementById('view-nutrition').style.display !== 'none') {
+    renderNutritionView();
+  }
 }
 
 function setStatusFilter(val, el) {
@@ -442,11 +575,12 @@ function renderWatch() {
         ${item.summary ? `<div class="card-summary">${esc(item.summary)}</div>` : ''}
         ${item.memo ? `<div class="card-cast">📝 ${esc(item.memo)}</div>` : ''}
         <div class="card-actions">
+          <button class="btn-sm primary" onclick="openEditWatchModal(${item.row}, '${esc(item.id)}')">✏️ 編集</button>
           <button class="btn-sm success" onclick="quickUpdate(${item.row}, {status:'${nextStatus}'})">${nextLabel}</button>
           <select class="btn-sm" onchange="if(this.value) quickUpdate(${item.row}, {rating:this.value})">
             <option value="">評価変更</option><option value="5">★5</option><option value="4">★4</option><option value="3">★3</option><option value="2">★2</option><option value="1">★1</option>
           </select>
-          <button class="btn-sm primary" onclick="quickUpdate(${item.row}, {runWiki:true})">🌐 Wikipedia補完</button>
+          <button class="btn-sm" onclick="quickUpdate(${item.row}, {runWiki:true})">🌐 Wikipedia補完</button>
         </div>
       </div>`;
   }).join('');
@@ -501,38 +635,152 @@ function safeSessionSet(k, v) {
   try { sessionStorage.setItem(k, v); } catch (e) {}
 }
 
+function parseLocations(locStr) {
+  return String(locStr || '').split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+}
+
+function buildDiaryCardHtml(d) {
+  const placeholder = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
+  const ids = d.imageIds || [];
+  const urls = d.imageUrls || [];
+  const locs = parseLocations(d.location);
+  const locHtml = locs.length > 0
+    ? `<div class="meta-row">${locs.map(l => `<a class="loc-badge" target="_blank" rel="noopener" href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(l)}">📍 ${esc(l)}</a>`).join('')}</div>`
+    : '';
+  const hasMeal = d.calories !== '' && d.calories !== undefined && d.calories !== null;
+  const pfcParts = [
+    d.protein !== '' && d.protein !== undefined ? `P:${d.protein}g` : '',
+    d.fat !== '' && d.fat !== undefined ? `F:${d.fat}g` : '',
+    d.carbs !== '' && d.carbs !== undefined ? `C:${d.carbs}g` : '',
+  ].filter(Boolean).join(' ');
+  const mealHtml = (d.mealType || hasMeal || d.nutritionAdvice)
+    ? `<div class="meal-badge">🍽️ ${esc(d.mealType || '食事')}${hasMeal ? ` ・ ${esc(d.calories)} kcal` : ''}${pfcParts ? `（${esc(pfcParts)}）` : ''}</div>${d.nutritionAdvice ? `<div class="card-cast">💡 ${esc(d.nutritionAdvice)}</div>` : ''}`
+    : '';
+  const mediaHtml = ids.length > 0
+    ? `<div class="thumb-strip">${ids.map((fid, i) => `<img class="thumb-img" data-file-id="${esc(fid)}" src="${placeholder}" alt="写真${i + 1}" onclick="openImagePreview('${esc(fid)}','${esc(urls[i] || '')}')">`).join('')}</div>`
+    : (urls.length > 0 ? `<div class="meta-row" style="margin-top:8px;">${urls.map((u, i) => `<a class="q-link" target="_blank" href="${esc(u)}">📷 写真${i + 1}</a>`).join('')}</div>` : '');
+  return `
+    <div class="card" id="dcard-${Number(d.row || 0)}">
+      <div class="card-head"><div class="card-title">${esc(d.date)} (${esc(d.weekday)}) ${esc(d.title || '')}</div></div>
+      ${locHtml}
+      ${mealHtml}
+      <div class="card-summary" style="white-space:pre-wrap;">${esc(d.body)}</div>
+      ${mediaHtml}
+      <div class="card-actions">
+        <button class="btn-sm primary" onclick="openEditDiaryModal(${Number(d.row || 0)}, '${esc(d.id)}')">✏️ 編集</button>
+        <button class="btn-sm success" onclick="quickAnalyzeMeal(${Number(d.row || 0)}, '${esc(d.id)}')">🍽️ 栄養分析</button>
+      </div>
+    </div>`;
+}
+
+function showMoreDiary() {
+  diaryDisplayLimit += 80;
+  renderDiary();
+}
+
 function renderDiary() {
   const q = document.getElementById('diary-search').value.trim().toLowerCase();
   const ym = document.getElementById('diary-ym').value;
   const list = diaryData.filter(d => {
     if (ym && !d.date.startsWith(ym)) return false;
-    if (q && !`${d.title} ${d.body} ${d.location}`.toLowerCase().includes(q)) return false;
+    if (q && !`${d.title} ${d.body} ${d.location} ${d.mealType || ''} ${d.nutritionAdvice || ''}`.toLowerCase().includes(q)) return false;
     return true;
   });
-  document.getElementById('diary-count').textContent = `表示中: ${list.length}件（直近取得${diaryData.length}件）`;
+  const showAll = Boolean(q || ym);
+  const sliced = showAll ? list : list.slice(0, diaryDisplayLimit);
+  document.getElementById('diary-count').textContent = `表示中: ${sliced.length}件 / 該当${list.length}件（全${diaryData.length}件）`;
+  document.getElementById('diary-more-wrap').style.display = (!showAll && list.length > diaryDisplayLimit) ? 'block' : 'none';
+
   const container = document.getElementById('diary-list');
-  if (list.length === 0) { container.innerHTML = '<div class="loading">該当する日記がありません</div>'; return; }
-  const placeholder = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
-  container.innerHTML = list.map(d => {
-    const ids = d.imageIds || [];
-    const urls = d.imageUrls || [];
-    const mediaHtml = ids.length > 0
-      ? `<div class="thumb-strip">${ids.map((fid, i) => `<img class="thumb-img" data-file-id="${esc(fid)}" src="${placeholder}" alt="写真${i + 1}" onclick="openImagePreview('${esc(fid)}','${esc(urls[i] || '')}')">`).join('')}</div>`
-      : (urls.length > 0 ? `<div class="meta-row" style="margin-top:8px;">${urls.map((u, i) => `<a class="q-link" target="_blank" href="${esc(u)}">📷 写真${i + 1}</a>`).join('')}</div>` : '');
-    return `
-    <div class="card">
-      <div class="card-head"><div class="card-title">${esc(d.date)} (${esc(d.weekday)}) ${esc(d.title || '')}</div></div>
-      ${d.location ? `<div class="meta-row"><span>📍 ${esc(d.location)}</span></div>` : ''}
-      <div class="card-summary" style="white-space:pre-wrap;">${esc(d.body)}</div>
-      ${mediaHtml}
-      <div class="card-actions">
-        <button class="btn-sm primary" onclick="openEditDiaryModal(${Number(d.row || 0)}, '${esc(d.id)}')">✏️ 編集</button>
-      </div>
-    </div>`;
-  }).join('');
+  if (sliced.length === 0) { container.innerHTML = '<div class="loading">該当する日記がありません</div>'; return; }
+  container.innerHTML = sliced.map(buildDiaryCardHtml).join('');
 
   ensureThumbObserver();
   container.querySelectorAll('img.thumb-img[data-file-id]').forEach(img => thumbObserver.observe(img));
+}
+
+function renderNutritionView() {
+  const sumEl = document.getElementById('nutrition-summary');
+  const listEl = document.getElementById('nutrition-list');
+  const countEl = document.getElementById('nutrition-count');
+
+  const mealEntries = diaryData.filter(d =>
+    (d.calories !== '' && d.calories !== undefined && d.calories !== null) || d.mealType || d.nutritionAdvice
+  );
+
+  // 直近7日間の日付リスト生成
+  const today = new Date();
+  const days = [];
+  for (let i = 6; i >= 0; i--) {
+    const dt = new Date(today.getTime() - i * 86400000);
+    const iso = `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
+    days.push(iso);
+  }
+  const dayTotals = {};
+  days.forEach(d => { dayTotals[d] = { kcal: 0, p: 0, f: 0, c: 0, count: 0 }; });
+  let weekKcal = 0, weekP = 0, weekF = 0, weekC = 0, weekDaysWithData = 0;
+
+  mealEntries.forEach(d => {
+    if (dayTotals[d.date]) {
+      const k = Number(d.calories || 0);
+      dayTotals[d.date].kcal += k;
+      dayTotals[d.date].p += Number(d.protein || 0);
+      dayTotals[d.date].f += Number(d.fat || 0);
+      dayTotals[d.date].c += Number(d.carbs || 0);
+      dayTotals[d.date].count++;
+    }
+  });
+  days.forEach(d => {
+    const v = dayTotals[d];
+    if (v.count > 0) {
+      weekDaysWithData++;
+      weekKcal += v.kcal; weekP += v.p; weekF += v.f; weekC += v.c;
+    }
+  });
+
+  const maxKcal = Math.max(2200, ...days.map(d => dayTotals[d].kcal));
+  const avgKcal = weekDaysWithData ? Math.round(weekKcal / weekDaysWithData) : 0;
+  const pEn = weekP * 4, fEn = weekF * 9, cEn = weekC * 4;
+  const totEn = pEn + fEn + cEn || 1;
+  const pPct = Math.round((pEn / totEn) * 100);
+  const fPct = Math.round((fEn / totEn) * 100);
+  const cPct = Math.max(0, 100 - pPct - fPct);
+
+  const barsHtml = days.map(d => {
+    const k = dayTotals[d].kcal;
+    const w = Math.min(100, Math.round((k / maxKcal) * 100));
+    const color = k > 2200 ? '#ef4444' : k > 0 ? '#0f9d58' : '#d1d5db';
+    return `
+      <div class="nut-bar-row">
+        <div class="nut-bar-label">${d.slice(5)}</div>
+        <div class="nut-bar-track"><div class="nut-bar-fill" style="width:${w}%;background:${color};"></div></div>
+        <div class="nut-bar-val">${k ? k + ' kcal' : '-'}</div>
+      </div>`;
+  }).join('');
+
+  sumEl.innerHTML = `
+    <div style="font-size:13px;margin-bottom:8px;">
+      週間平均（記録日 ${weekDaysWithData}日）: <strong>${avgKcal} kcal/日</strong>
+    </div>
+    ${barsHtml}
+    <div style="margin-top:10px;font-size:12px;color:var(--muted);">
+      週間PFC比率（目標目安 P:15% / F:25% / C:60%）:
+      <strong>P ${pPct}% (${Math.round(weekP)}g) ・ F ${fPct}% (${Math.round(weekF)}g) ・ C ${cPct}% (${Math.round(weekC)}g)</strong>
+    </div>
+    <div class="pfc-ratio-bar">
+      <div style="width:${pPct}%;background:#3b82f6;" title="タンパク質"></div>
+      <div style="width:${fPct}%;background:#f59e0b;" title="脂質"></div>
+      <div style="width:${cPct}%;background:#10b981;" title="炭水化物"></div>
+    </div>`;
+
+  countEl.textContent = `食事・栄養記録あり: ${mealEntries.length}件（日記カードの「🍽️ 栄養分析」から追加できます）`;
+  if (mealEntries.length === 0) {
+    listEl.innerHTML = '<div class="loading">まだ食事・栄養記録がありません。日記カードの「🍽️ 栄養分析」または編集画面から記録してください。</div>';
+    return;
+  }
+  listEl.innerHTML = mealEntries.slice(0, 50).map(buildDiaryCardHtml).join('');
+  ensureThumbObserver();
+  listEl.querySelectorAll('img.thumb-img[data-file-id]').forEach(img => thumbObserver.observe(img));
 }
 
 async function openImagePreview(fid, driveUrl) {
@@ -546,38 +794,176 @@ async function openImagePreview(fid, driveUrl) {
   } catch (e) { /* keep thumb */ }
 }
 
-function openWatchModal() { document.getElementById('modal-watch').classList.add('open'); }
+function openWatchModal() {
+  editingWatch = null;
+  document.getElementById('watch-modal-title').textContent = '🎬 鑑賞記録を追加';
+  document.getElementById('btn-save-watch').textContent = '保存する';
+  document.getElementById('btn-delete-watch').style.display = 'none';
+  document.getElementById('w-wiki-label').textContent = '登録時にWikipediaからキャスト・概要を自動補完する';
+  document.getElementById('w-wiki').checked = true;
+  document.getElementById('watch-extra-details').open = false;
+  document.getElementById('w-title').value = '';
+  document.getElementById('w-cat').value = 'ドラマ';
+  document.getElementById('w-plat').value = '';
+  document.getElementById('w-status').value = '進行中';
+  document.getElementById('w-rating').value = '';
+  document.getElementById('w-date').value = new Date().toISOString().slice(0, 10);
+  document.getElementById('w-memo').value = '';
+  document.getElementById('w-year').value = '';
+  document.getElementById('w-cast').value = '';
+  document.getElementById('w-staff').value = '';
+  document.getElementById('w-summary').value = '';
+  document.getElementById('w-url').value = '';
+  document.getElementById('modal-watch').classList.add('open');
+}
+
+function openEditWatchModal(row, id) {
+  const item = watchData.find(x => (row && x.row === row) || String(x.id) === String(id));
+  if (!item) return;
+  editingWatch = item;
+  document.getElementById('watch-modal-title').textContent = '✏️ 鑑賞記録を編集';
+  document.getElementById('btn-save-watch').textContent = '変更を保存する';
+  document.getElementById('btn-delete-watch').style.display = 'block';
+  document.getElementById('w-wiki-label').textContent = '保存時にWikipediaからキャスト・概要を再補完する';
+  document.getElementById('w-wiki').checked = false;
+  document.getElementById('watch-extra-details').open = true;
+  document.getElementById('w-title').value = item.title || '';
+  document.getElementById('w-cat').value = item.category || 'その他';
+  document.getElementById('w-plat').value = item.platform || '';
+  document.getElementById('w-status').value = item.status || '進行中';
+  document.getElementById('w-rating').value = item.rating || '';
+  document.getElementById('w-date').value = item.watchDate || '';
+  document.getElementById('w-memo').value = item.memo || '';
+  document.getElementById('w-year').value = item.releaseYear || '';
+  document.getElementById('w-cast').value = item.cast || '';
+  document.getElementById('w-staff').value = item.staff || '';
+  document.getElementById('w-summary').value = item.summary || '';
+  document.getElementById('w-url').value = item.relatedUrl || '';
+  document.getElementById('modal-watch').classList.add('open');
+}
+
+function renderLocationChips() {
+  const wrap = document.getElementById('d-loc-chips');
+  if (!diaryLocations.length) { wrap.innerHTML = ''; return; }
+  wrap.innerHTML = diaryLocations.map((loc, idx) => `
+    <span class="loc-chip">
+      <span>📍 ${esc(loc)}</span>
+      ${idx > 0 ? `<button type="button" onclick="moveDiaryLocation(${idx}, -1)" title="前へ">↑</button>` : ''}
+      ${idx < diaryLocations.length - 1 ? `<button type="button" onclick="moveDiaryLocation(${idx}, 1)" title="後ろへ">↓</button>` : ''}
+      <button type="button" onclick="removeDiaryLocation(${idx})" title="削除">✕</button>
+    </span>`).join('');
+}
+
+function addDiaryLocation(name) {
+  const clean = String(name || '').trim();
+  if (!clean) return;
+  if (!diaryLocations.includes(clean)) diaryLocations.push(clean);
+  renderLocationChips();
+}
+
+function addLocationFromInput() {
+  const inp = document.getElementById('d-loc');
+  const val = inp.value.trim();
+  if (!val) return;
+  val.split(/\r?\n/).forEach(v => addDiaryLocation(v));
+  inp.value = '';
+  document.getElementById('loc-status').textContent = `場所を追加しました（計${diaryLocations.length}件）`;
+}
+
+function moveDiaryLocation(idx, delta) {
+  const ni = idx + delta;
+  if (ni < 0 || ni >= diaryLocations.length) return;
+  const tmp = diaryLocations[idx];
+  diaryLocations[idx] = diaryLocations[ni];
+  diaryLocations[ni] = tmp;
+  renderLocationChips();
+}
+
+function removeDiaryLocation(idx) {
+  diaryLocations.splice(idx, 1);
+  renderLocationChips();
+}
+
+function renderEditExistingPhotos(entry) {
+  const wrap = document.getElementById('d-existing-photos');
+  const urls = (entry && entry.imageUrls) || [];
+  const ids = (entry && entry.imageIds) || [];
+  if (urls.length === 0) { wrap.innerHTML = ''; return; }
+  wrap.innerHTML = urls.map((u, idx) => {
+    const fid = ids[idx] || '';
+    const isRemoved = removedPhotoUrls.has(u);
+    const src = (fid && thumbMemCache[fid]) ? thumbMemCache[fid] : 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
+    return `
+      <div class="edit-photo-item ${isRemoved ? 'removed' : ''}">
+        <img class="thumb-img" style="width:76px;height:76px;" data-file-id="${esc(fid)}" src="${src}" alt="既存写真${idx + 1}">
+        <button type="button" class="edit-photo-del" onclick="toggleRemoveExistingPhoto('${esc(u)}')" title="削除/復元">${isRemoved ? '↺' : '✕'}</button>
+      </div>`;
+  }).join('');
+  ensureThumbObserver();
+  wrap.querySelectorAll('img.thumb-img[data-file-id]').forEach(img => thumbObserver.observe(img));
+}
+
+function toggleRemoveExistingPhoto(url) {
+  if (removedPhotoUrls.has(url)) removedPhotoUrls.delete(url);
+  else removedPhotoUrls.add(url);
+  renderEditExistingPhotos(editingDiary);
+}
+
 function resetLocationPicker() {
   document.getElementById('loc-status').textContent = '';
   const box = document.getElementById('loc-suggestions');
   box.style.display = 'none';
   box.innerHTML = '';
 }
+
 function openDiaryModal() {
   editingDiary = null;
+  diaryLocations = [];
+  removedPhotoUrls = new Set();
   document.getElementById('diary-modal-title').textContent = '📓 日記を書く';
   document.getElementById('btn-save-diary').textContent = '日記を保存する';
+  document.getElementById('btn-delete-diary').style.display = 'none';
   document.getElementById('d-photos-label').textContent = '写真（自動で1200px以下にリサイズしてDrive保存）';
   document.getElementById('d-date').value = new Date().toISOString().slice(0, 10);
   document.getElementById('d-title').value = '';
   document.getElementById('d-loc').value = '';
   document.getElementById('d-body').value = '';
+  document.getElementById('d-meal-type').value = '';
+  document.getElementById('d-cal').value = '';
+  document.getElementById('d-p').value = '';
+  document.getElementById('d-f').value = '';
+  document.getElementById('d-c').value = '';
+  document.getElementById('d-nut-advice').value = '';
   document.getElementById('d-photos').value = '';
+  renderLocationChips();
+  renderEditExistingPhotos(null);
   resetLocationPicker();
   document.getElementById('modal-diary').classList.add('open');
 }
+
 function openEditDiaryModal(row, id) {
   const entry = diaryData.find(x => (row && x.row === row) || String(x.id) === String(id));
   if (!entry) return;
   editingDiary = entry;
+  diaryLocations = parseLocations(entry.location);
+  removedPhotoUrls = new Set();
   document.getElementById('diary-modal-title').textContent = '✏️ 日記を編集';
   document.getElementById('btn-save-diary').textContent = '変更を保存する';
-  document.getElementById('d-photos-label').textContent = '写真を追加（任意・既存写真は保持）';
+  document.getElementById('btn-delete-diary').style.display = 'block';
+  document.getElementById('d-photos-label').textContent = '写真（既存写真の削除 / 新規写真の追加）';
   document.getElementById('d-date').value = entry.date || '';
   document.getElementById('d-title').value = entry.title || '';
-  document.getElementById('d-loc').value = entry.location || '';
+  document.getElementById('d-loc').value = '';
   document.getElementById('d-body').value = entry.body || '';
+  document.getElementById('d-meal-type').value = entry.mealType || '';
+  document.getElementById('d-cal').value = entry.calories !== '' && entry.calories !== undefined ? entry.calories : '';
+  document.getElementById('d-p').value = entry.protein !== '' && entry.protein !== undefined ? entry.protein : '';
+  document.getElementById('d-f').value = entry.fat !== '' && entry.fat !== undefined ? entry.fat : '';
+  document.getElementById('d-c').value = entry.carbs !== '' && entry.carbs !== undefined ? entry.carbs : '';
+  document.getElementById('d-nut-advice').value = entry.nutritionAdvice || '';
   document.getElementById('d-photos').value = '';
+  renderLocationChips();
+  renderEditExistingPhotos(entry);
   resetLocationPicker();
   document.getElementById('modal-diary').classList.add('open');
 }
@@ -626,8 +1012,9 @@ function renderLocationSuggestions(items) {
 function selectLocationCandidate(idx) {
   const it = lastLocationCandidates[idx];
   if (!it) return;
-  document.getElementById('d-loc').value = it.name;
-  document.getElementById('loc-status').textContent = `選択済み: ${it.name}`;
+  addDiaryLocation(it.name);
+  document.getElementById('d-loc').value = '';
+  document.getElementById('loc-status').textContent = `追加済み: ${it.name}（計${diaryLocations.length}件・さらに追加可）`;
   document.getElementById('loc-suggestions').style.display = 'none';
 }
 
@@ -743,8 +1130,10 @@ async function submitWatch() {
   const title = document.getElementById('w-title').value.trim();
   if (!title) { alert('タイトルを入力してください'); return; }
   const btn = document.getElementById('btn-save-watch');
-  btn.disabled = true; btn.textContent = '保存中...';
-  await apiPost('addWatch', {
+  const isEdit = Boolean(editingWatch);
+  btn.disabled = true; btn.textContent = isEdit ? '更新中...' : '保存中...';
+
+  const payload = {
     title,
     category: document.getElementById('w-cat').value,
     platform: document.getElementById('w-plat').value,
@@ -752,16 +1141,125 @@ async function submitWatch() {
     rating: document.getElementById('w-rating').value,
     watchDate: document.getElementById('w-date').value,
     memo: document.getElementById('w-memo').value,
-    autoWiki: document.getElementById('w-wiki').checked,
-  });
-  btn.disabled = false; btn.textContent = '保存する';
-  document.getElementById('w-title').value = ''; document.getElementById('w-memo').value = '';
-  closeModals(); loadWatchData();
+    releaseYear: document.getElementById('w-year').value,
+    cast: document.getElementById('w-cast').value,
+    staff: document.getElementById('w-staff').value,
+    summary: document.getElementById('w-summary').value,
+    relatedUrl: document.getElementById('w-url').value,
+  };
+
+  if (isEdit) {
+    payload.row = editingWatch.row;
+    payload.id = editingWatch.id;
+    payload.runWiki = document.getElementById('w-wiki').checked;
+    const res = await apiPost('updateWatchFull', payload);
+    btn.disabled = false; btn.textContent = '変更を保存する';
+    if (!res || !res.ok) {
+      alert('更新に失敗しました: ' + ((res && res.error) || 'Unknown error'));
+      return;
+    }
+    if (res.entry) {
+      const idx = watchData.findIndex(x => x.row === res.entry.row || String(x.id) === String(res.entry.id));
+      if (idx >= 0) watchData[idx] = res.entry;
+    }
+    editingWatch = null;
+    closeModals();
+    renderWatch();
+  } else {
+    payload.autoWiki = document.getElementById('w-wiki').checked;
+    await apiPost('addWatch', payload);
+    btn.disabled = false; btn.textContent = '保存する';
+    closeModals();
+    loadWatchData();
+  }
+}
+
+async function deleteCurrentWatch() {
+  if (!editingWatch) return;
+  if (!confirm(`「${editingWatch.title}」を削除しますか？（元に戻せません）`)) return;
+  const btn = document.getElementById('btn-delete-watch');
+  btn.disabled = true; btn.textContent = '削除中...';
+  const res = await apiPost('deleteWatch', { row: editingWatch.row, id: editingWatch.id });
+  btn.disabled = false; btn.textContent = '🗑️ この鑑賞記録を削除';
+  if (!res || !res.ok) {
+    alert('削除に失敗しました: ' + ((res && res.error) || 'Unknown error'));
+    return;
+  }
+  editingWatch = null;
+  closeModals();
+  loadWatchData();
+}
+
+async function analyzeMealInModal() {
+  const title = document.getElementById('d-title').value.trim();
+  const body = document.getElementById('d-body').value.trim();
+  const imageIds = editingDiary ? (editingDiary.imageIds || []) : [];
+  if (!title && !body && imageIds.length === 0) {
+    alert('分析する本文または写真が必要です');
+    return;
+  }
+  const btn = document.getElementById('btn-analyze-meal');
+  btn.disabled = true; btn.textContent = '分析中...';
+  try {
+    const res = await apiPost('analyzeMeal', {
+      title, body, imageIds,
+      mealType: document.getElementById('d-meal-type').value,
+      save: false,
+    });
+    if (res && res.ok && res.analysis) {
+      const a = res.analysis;
+      document.getElementById('d-meal-type').value = a.mealType || '昼食';
+      document.getElementById('d-cal').value = a.calories !== undefined ? a.calories : '';
+      document.getElementById('d-p').value = a.protein !== undefined ? a.protein : '';
+      document.getElementById('d-f').value = a.fat !== undefined ? a.fat : '';
+      document.getElementById('d-c').value = a.carbs !== undefined ? a.carbs : '';
+      document.getElementById('d-nut-advice').value = a.advice || '';
+    } else {
+      alert('栄養分析に失敗しました');
+    }
+  } finally {
+    btn.disabled = false; btn.textContent = '✨ 本文・写真から自動分析';
+  }
+}
+
+async function quickAnalyzeMeal(row, id) {
+  const entry = diaryData.find(x => (row && x.row === row) || String(x.id) === String(id));
+  if (!entry) return;
+  const card = document.getElementById(`dcard-${Number(entry.row || 0)}`);
+  if (card) card.style.opacity = '0.6';
+  try {
+    const res = await apiPost('analyzeMeal', {
+      row: entry.row,
+      id: entry.id,
+      title: entry.title,
+      body: entry.body,
+      imageIds: entry.imageIds || [],
+      mealType: entry.mealType || '',
+      save: true,
+    });
+    if (res && res.ok && res.entry) {
+      const idx = diaryData.findIndex(x => (res.entry.row && x.row === res.entry.row) || String(x.id) === String(res.entry.id));
+      if (idx >= 0) diaryData[idx] = res.entry;
+      renderDiary();
+      if (document.getElementById('view-nutrition').style.display !== 'none') renderNutritionView();
+    } else {
+      alert('栄養分析に失敗しました');
+    }
+  } finally {
+    if (card) card.style.opacity = '1';
+  }
 }
 
 async function submitDiary() {
   const body = document.getElementById('d-body').value.trim();
   if (!body) { alert('本文を入力してください'); return; }
+  // 入力欄に残っている未追加の場所テキストも自動追加
+  const pendingLoc = document.getElementById('d-loc').value.trim();
+  if (pendingLoc) {
+    pendingLoc.split(/\r?\n/).forEach(v => addDiaryLocation(v));
+    document.getElementById('d-loc').value = '';
+  }
+
   const btn = document.getElementById('btn-save-diary');
   const isEdit = Boolean(editingDiary);
   btn.disabled = true; btn.textContent = isEdit ? '更新中...' : 'アップロード中...';
@@ -772,13 +1270,21 @@ async function submitDiary() {
   const payload = {
     date: document.getElementById('d-date').value,
     title: document.getElementById('d-title').value,
-    location: document.getElementById('d-loc').value,
-    body, photos,
+    location: diaryLocations.join('\n'),
+    body,
+    photos,
+    mealType: document.getElementById('d-meal-type').value,
+    calories: document.getElementById('d-cal').value,
+    protein: document.getElementById('d-p').value,
+    fat: document.getElementById('d-f').value,
+    carbs: document.getElementById('d-c').value,
+    nutritionAdvice: document.getElementById('d-nut-advice').value,
   };
 
   if (isEdit) {
     payload.row = editingDiary.row;
     payload.id = editingDiary.id;
+    payload.removeUrls = Array.from(removedPhotoUrls);
     const res = await apiPost('updateDiary', payload);
     btn.disabled = false; btn.textContent = '変更を保存する';
     if (!res || !res.ok) {
@@ -792,6 +1298,7 @@ async function submitDiary() {
     editingDiary = null;
     closeModals();
     renderDiary();
+    if (document.getElementById('view-nutrition').style.display !== 'none') renderNutritionView();
   } else {
     const res = await apiPost('addDiary', payload);
     btn.disabled = false; btn.textContent = '日記を保存する';
@@ -799,9 +1306,24 @@ async function submitDiary() {
       alert('保存に失敗しました: ' + ((res && res.error) || 'Unknown error'));
       return;
     }
-    document.getElementById('d-title').value = ''; document.getElementById('d-loc').value = ''; document.getElementById('d-body').value = ''; document.getElementById('d-photos').value = '';
     closeModals(); switchTab('diary'); loadDiaryData();
   }
+}
+
+async function deleteCurrentDiary() {
+  if (!editingDiary) return;
+  if (!confirm(`「${editingDiary.date} ${editingDiary.title || '(無題)'}」を削除しますか？（元に戻せません）`)) return;
+  const btn = document.getElementById('btn-delete-diary');
+  btn.disabled = true; btn.textContent = '削除中...';
+  const res = await apiPost('deleteDiary', { row: editingDiary.row, id: editingDiary.id });
+  btn.disabled = false; btn.textContent = '🗑️ この日記を削除';
+  if (!res || !res.ok) {
+    alert('削除に失敗しました: ' + ((res && res.error) || 'Unknown error'));
+    return;
+  }
+  editingDiary = null;
+  closeModals();
+  loadDiaryData();
 }
 
 function resizeImageToJpgBase64(file, maxDim, quality) {
