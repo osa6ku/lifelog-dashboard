@@ -308,6 +308,7 @@ function doPost(e) {
     if (action === 'deleteWatch') return jsonResponse_(deleteWatchEntry(body.payload || {}));
     if (action === 'addDiary') return jsonResponse_(addDiaryEntry(body.payload || {}));
     if (action === 'updateDiary') return jsonResponse_(updateDiaryEntry(body.payload || {}));
+    if (action === 'syncDiaryDoc') return jsonResponse_(syncDiaryDocAction(body.payload || {}));
     if (action === 'deleteDiary') return jsonResponse_(deleteDiaryEntry(body.payload || {}));
     if (action === 'analyzeMeal') return jsonResponse_(analyzeMealEntry(body.payload || {}));
     if (action === 'addMeal') return jsonResponse_(addMealEntry(body.payload || {}));
@@ -316,6 +317,7 @@ function doPost(e) {
     if (action === 'importMeals') return jsonResponse_(importMealsBatch(body.payload || {}));
     if (action === 'migrateMealPhotosToDiary') return jsonResponse_(migrateMealPhotosToDiary());
     if (action === 'batchSortDiaryPhotos') return jsonResponse_(batchSortDiaryPhotos(body.payload || {}));
+    if (action === 'batchUpdateDiaryLocations') return jsonResponse_(batchUpdateDiaryLocations(body.payload || {}));
     return jsonResponse_({ ok: false, error: 'Unknown action: ' + action });
   } catch (err) {
     return jsonResponse_({ ok: false, error: String(err) });
@@ -744,6 +746,7 @@ function addDiaryEntry(payload) {
           id: r[0],
           row: dupRow,
           date: dateStr,
+          needsDocSync: false,
           entry: formatDiaryRow_(dupRow, dupFull, dupCols),
         };
       }
@@ -757,59 +760,67 @@ function addDiaryEntry(payload) {
   const imageFormula = firstFileId ? `=IMAGE("https://drive.google.com/uc?export=view&id=${firstFileId}")` : '';
   const docId = YEAR_DOC_IDS[year] || '';
   const docUrl = docId ? `https://docs.google.com/document/d/${docId}/edit` : '';
+  const timeStr = Utilities.formatDate(new Date(), 'Asia/Tokyo', 'HH:mm');
 
-  sheet.appendRow([
-    nextId,
-    dateStr,
-    weekday,
-    Utilities.formatDate(new Date(), 'Asia/Tokyo', 'HH:mm'),
-    title,
-    body,
-    location,
-    jpgNames.length,
-    jpgNames.join('\n'),
-    driveUrls.join('\n'),
-    imageFormula,
-    docUrl,
-    'webapp_entry',
-  ]);
-  const insertedRow = sheet.getLastRow();
-  writeDiaryNutritionCols_(sheet, insertedRow, payload);
+  const cols = getDiaryNutritionCols_(sheet, true);
+  const rowArr = new Array(cols.totalCols).fill('');
+  rowArr[0] = nextId;
+  rowArr[1] = dateStr;
+  rowArr[2] = weekday;
+  rowArr[3] = timeStr;
+  rowArr[4] = title;
+  rowArr[5] = body;
+  rowArr[6] = location;
+  rowArr[7] = jpgNames.length;
+  rowArr[8] = jpgNames.join('\n');
+  rowArr[9] = driveUrls.join('\n');
+  rowArr[10] = imageFormula;
+  rowArr[11] = docUrl;
+  rowArr[12] = 'webapp_entry';
+  applyDiaryExtraToArray_(rowArr, cols, payload, normLocs);
 
-  // 年別ドキュメントへ追記（失敗しても本体保存成功を返す）
-  let docSynced = false;
-  if (docId) {
-    try {
-      const doc = DocumentApp.openById(docId);
-      const docBody = doc.getBody();
-      const hText = `${dateStr} (${weekday}) — ${title || '(無題)'}`;
-      docBody.appendParagraph(hText).setHeading(DocumentApp.ParagraphHeading.HEADING2);
-      if (location) docBody.appendParagraph(`📍 場所: ${location.split('\n').join(' → ')}`);
-      if (body) docBody.appendParagraph(body);
-      driveUrls.forEach((u, idx) => {
-        const p = docBody.appendParagraph(`📷 写真: ${jpgNames[idx]}`);
-        p.setLinkUrl(u);
-      });
-      docBody.appendHorizontalRule();
-      doc.saveAndClose();
-      docSynced = true;
-    } catch (err) {
-      docSynced = false;
-    }
-  }
+  const insertedRow = lastRow + 1;
+  sheet.getRange(insertedRow, 1, 1, cols.totalCols).setValues([rowArr]);
 
-  const cols = getDiaryNutritionCols_(sheet, false);
-  const inserted = sheet.getRange(insertedRow, 1, 1, cols.totalCols).getValues()[0];
-
+  // Doc同期はメイン保存から完全切り離し（フロントから非同期 syncDiaryDoc で実行）
   return {
     ok: true,
     id: nextId,
     row: insertedRow,
     date: dateStr,
-    docSynced,
+    docSynced: false,
+    needsDocSync: Boolean(docId),
+    docSyncPayload: docId ? {
+      mode: 'add',
+      date: dateStr,
+      weekday,
+      title,
+      location,
+      body,
+      jpgNames,
+      driveUrls,
+    } : null,
     failedPhotos,
-    entry: formatDiaryRow_(insertedRow, inserted, cols),
+    entry: formatDiaryRow_(insertedRow, rowArr, cols),
   };
+}
+
+function applyDiaryExtraToArray_(rowArr, cols, payload, normLocs) {
+  if (payload.mealType !== undefined && cols.mealTypeCol) {
+    rowArr[cols.mealTypeCol - 1] = String(payload.mealType || '').trim();
+  }
+  if (payload.calories !== undefined && cols.caloriesCol) {
+    const calVal = payload.calories === '' || payload.calories === null ? '' : Number(payload.calories);
+    rowArr[cols.caloriesCol - 1] = isNaN(calVal) ? '' : calVal;
+  }
+  if ((payload.protein !== undefined || payload.fat !== undefined || payload.carbs !== undefined || payload.nutritionAdvice !== undefined) && cols.nutritionCol) {
+    rowArr[cols.nutritionCol - 1] = formatNutritionStr_(payload.protein, payload.fat, payload.carbs, payload.nutritionAdvice);
+  }
+  if (payload.locations !== undefined && cols.locJsonCol) {
+    const locs = normLocs || normalizeLocationsPayload_(payload.location, payload.locations);
+    const hasCoords = locs.some(l => l.lat !== null && l.lng !== null);
+    rowArr[cols.locJsonCol - 1] = hasCoords ? JSON.stringify(locs) : '';
+  }
 }
 
 function updateDiaryEntry(payload) {
@@ -818,76 +829,107 @@ function updateDiaryEntry(payload) {
   const row = resolveRowByIdOrIndex_(sheet, 1, payload.row, payload.id);
   if (row < 2) return { ok: false, error: 'Diary entry not found' };
 
-  const cur = sheet.getRange(row, 1, 1, 13).getValues()[0];
-  const oldDate = formatDateVal_(cur[1]);
-  const oldTitle = String(cur[4] || '');
-  const oldBody = String(cur[5] || '').trim();
+  // ヘッダー行(1行目)と対象行(row行目)の2行のみを取得して O(1) 更新
+  const cols = getDiaryNutritionCols_(sheet, true);
+  const rowArr = sheet.getRange(row, 1, 1, cols.totalCols).getValues()[0];
+  const oldDate = formatDateVal_(rowArr[1]);
+  const oldTitle = String(rowArr[4] || '');
+  const oldBody = String(rowArr[5] || '').trim();
 
   const dateStr = payload.date ? String(payload.date).slice(0, 10) : oldDate;
   const weekday = getWeekdayJa_(dateStr);
   const title = payload.title !== undefined ? String(payload.title).trim() : oldTitle;
-  const body = payload.body !== undefined ? String(payload.body).trim() : String(cur[5] || '');
-  const location = payload.locations !== undefined
-    ? normalizeLocationsPayload_(payload.location, payload.locations).map(l => l.name).join('\n')
-    : (payload.location !== undefined ? String(payload.location).trim() : String(cur[6] || ''));
+  const body = payload.body !== undefined ? String(payload.body).trim() : String(rowArr[5] || '');
+  const normLocs = payload.locations !== undefined ? normalizeLocationsPayload_(payload.location, payload.locations) : null;
+  const location = normLocs
+    ? normLocs.map(l => l.name).join('\n')
+    : (payload.location !== undefined ? String(payload.location).trim() : String(rowArr[6] || ''));
 
-  sheet.getRange(row, 2).setValue(dateStr);
-  sheet.getRange(row, 3).setValue(weekday);
-  sheet.getRange(row, 5).setValue(title);
-  sheet.getRange(row, 6).setValue(body);
-  sheet.getRange(row, 7).setValue(location);
+  rowArr[1] = dateStr;
+  rowArr[2] = weekday;
+  rowArr[4] = title;
+  rowArr[5] = body;
+  rowArr[6] = location;
 
-  // 既存写真の削除＋新規写真の追加
+  // 既存写真の削除＋新規写真の追加（メモリ上の rowArr へ反映）
   const removeSet = new Set((payload.removeUrls || []).map(String));
-  const prevNames = String(cur[8] || '').split('\n').filter(Boolean);
-  const prevUrls = String(cur[9] || '').split('\n').filter(Boolean);
-  const keptNames = [];
-  const keptUrls = [];
-  prevUrls.forEach((u, idx) => {
-    if (!removeSet.has(u)) {
-      keptUrls.push(u);
-      keptNames.push(prevNames[idx] || `photo_${idx + 1}.jpg`);
-    }
-  });
-
   const added = saveDiaryPhotos_(dateStr, payload.photos || []);
-  // 新しい写真が常に先頭（降順）になるように配置
-  const allNames = [...added.jpgNames, ...keptNames];
-  const allUrls = [...added.driveUrls, ...keptUrls];
-
   if (removeSet.size > 0 || added.jpgNames.length > 0) {
-    sheet.getRange(row, 8).setValue(allNames.length);
-    sheet.getRange(row, 9).setValue(allNames.join('\n'));
-    sheet.getRange(row, 10).setValue(allUrls.join('\n'));
+    const prevNames = String(rowArr[8] || '').split('\n').filter(Boolean);
+    const prevUrls = String(rowArr[9] || '').split('\n').filter(Boolean);
+    const keptNames = [];
+    const keptUrls = [];
+    prevUrls.forEach((u, idx) => {
+      if (!removeSet.has(u)) {
+        keptUrls.push(u);
+        keptNames.push(prevNames[idx] || `photo_${idx + 1}.jpg`);
+      }
+    });
+    const allNames = [...added.jpgNames, ...keptNames];
+    const allUrls = [...added.driveUrls, ...keptUrls];
     const firstIdMatch = (allUrls[0] || '').match(/\/d\/([^/]+)/);
-    const formula = firstIdMatch ? `=IMAGE("https://drive.google.com/uc?export=view&id=${firstIdMatch[1]}")` : '';
-    sheet.getRange(row, 11).setValue(formula);
+    rowArr[7] = allNames.length;
+    rowArr[8] = allNames.join('\n');
+    rowArr[9] = allUrls.join('\n');
+    rowArr[10] = firstIdMatch ? `=IMAGE("https://drive.google.com/uc?export=view&id=${firstIdMatch[1]}")` : '';
   }
 
-  writeDiaryNutritionCols_(sheet, row, payload);
+  applyDiaryExtraToArray_(rowArr, cols, payload, normLocs);
+  rowArr[12] = `edited ${Utilities.formatDate(new Date(), 'Asia/Tokyo', 'yyyy-MM-dd HH:mm')}`;
 
-  const editedStamp = Utilities.formatDate(new Date(), 'Asia/Tokyo', 'yyyy-MM-dd HH:mm');
-  sheet.getRange(row, 13).setValue(`edited ${editedStamp}`);
+  // シート1行一括書き込み（setValues 1回のみ）
+  sheet.getRange(row, 1, 1, cols.totalCols).setValues([rowArr]);
 
   const needsDocSync = (dateStr !== oldDate) || (title !== oldTitle) || (body !== oldBody);
-  let docSynced = false;
-  let docSyncSkipped = !needsDocSync;
-  if (needsDocSync) {
-    try {
-      docSynced = syncDiaryDocUpdate_(oldDate, oldTitle, dateStr, weekday, title, location, body);
-    } catch (err) {
-      // Doc同期が失敗してもスプレッドシートの保存結果は維持する
-    }
-  }
-
-  const cols = getDiaryNutritionCols_(sheet, false);
-  const updated = sheet.getRange(row, 1, 1, cols.totalCols).getValues()[0];
   return {
     ok: true,
-    docSynced,
-    docSyncSkipped,
-    entry: formatDiaryRow_(row, updated, cols),
+    docSynced: false,
+    docSyncSkipped: !needsDocSync,
+    needsDocSync,
+    docSyncPayload: needsDocSync ? {
+      mode: 'update',
+      oldDate,
+      oldTitle,
+      date: dateStr,
+      weekday,
+      title,
+      location,
+      body,
+    } : null,
+    entry: formatDiaryRow_(row, rowArr, cols),
   };
+}
+
+function syncDiaryDocAction(payload) {
+  const mode = payload.mode || 'update';
+  if (mode === 'add') {
+    const year = String(payload.date || '').slice(0, 4);
+    const docId = YEAR_DOC_IDS[year];
+    if (!docId) return { ok: true, docSynced: false };
+    try {
+      const doc = DocumentApp.openById(docId);
+      const docBody = doc.getBody();
+      const hText = `${payload.date} (${payload.weekday || ''}) — ${payload.title || '(無題)'}`;
+      docBody.appendParagraph(hText).setHeading(DocumentApp.ParagraphHeading.HEADING2);
+      if (payload.location) docBody.appendParagraph(`📍 場所: ${String(payload.location).split('\n').join(' → ')}`);
+      if (payload.body) docBody.appendParagraph(String(payload.body));
+      const jpgNames = payload.jpgNames || [];
+      (payload.driveUrls || []).forEach((u, idx) => {
+        docBody.appendParagraph(`📷 写真: ${jpgNames[idx] || 'photo.jpg'}`).setLinkUrl(u);
+      });
+      docBody.appendHorizontalRule();
+      doc.saveAndClose();
+      return { ok: true, docSynced: true };
+    } catch (err) {
+      return { ok: false, docSynced: false, error: String(err) };
+    }
+  }
+  try {
+    const ok = syncDiaryDocUpdate_(payload.oldDate, payload.oldTitle, payload.date, payload.weekday, payload.title, payload.location, payload.body);
+    return { ok: true, docSynced: ok };
+  } catch (err) {
+    return { ok: false, docSynced: false, error: String(err) };
+  }
 }
 
 function deleteDiaryEntry(payload) {
@@ -1160,6 +1202,27 @@ function batchSortDiaryPhotos(payload) {
     const row = Number(u.row);
     if (row < 2) return;
     sheet.getRange(row, 9, 1, 3).setValues([[u.names || '', u.urls || '', u.formula || '']]);
+    count++;
+  });
+  return { ok: true, updated: count };
+}
+
+function batchUpdateDiaryLocations(payload) {
+  const updates = payload.updates || [];
+  if (updates.length === 0) return { ok: true, updated: 0 };
+  const ss = SpreadsheetApp.openById(DIARY_SS_ID);
+  const sheet = ss.getSheetByName(DIARY_SHEET_NAME);
+  const cols = getDiaryNutritionCols_(sheet, true);
+  let count = 0;
+  updates.forEach(u => {
+    const row = Number(u.row);
+    if (row < 2) return;
+    if (u.location !== undefined) {
+      sheet.getRange(row, 7).setValue(String(u.location || ''));
+    }
+    if (u.locJson !== undefined && cols.locJsonCol) {
+      sheet.getRange(row, cols.locJsonCol).setValue(String(u.locJson || ''));
+    }
     count++;
   });
   return { ok: true, updated: count };

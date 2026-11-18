@@ -9,7 +9,7 @@
   <link rel="manifest" href="./manifest.json">
   <link rel="apple-touch-icon" href="./apple-touch-icon.png">
   <link rel="icon" type="image/png" href="./icon-192.png">
-  <title>ライフログ・ダッシュボード v1.11.2</title>
+  <title>ライフログ・ダッシュボード v1.13.0</title>
   <style>
     :root {
       --bg: #f4f6f9;
@@ -240,10 +240,10 @@
     .mt-夕 { background: #dbeafe; color: #1d4ed8; }
     .mt-間 { background: #f3e8ff; color: #7e22ce; }
     .toast-box {
-      display: none; position: fixed; bottom: 72px; left: 50%; transform: translateX(-50%);
-      z-index: 90; width: calc(100% - 24px); max-width: 560px;
-      background: #1f2937; color: #fff; padding: 10px 14px; border-radius: 12px;
-      font-size: 13px; font-weight: 600; box-shadow: 0 6px 20px rgba(0,0,0,0.22);
+      display: none; position: fixed; bottom: 70px; right: 14px;
+      z-index: 90; max-width: min(360px, calc(100% - 28px));
+      background: #1f2937; color: #fff; padding: 9px 13px; border-radius: 12px;
+      font-size: 12px; font-weight: 600; box-shadow: 0 6px 20px rgba(0,0,0,0.22);
       align-items: center; justify-content: space-between; gap: 10px;
     }
     .toast-box.show { display: flex; }
@@ -260,7 +260,7 @@
   <div class="header-top">
     <h1 class="app-title">📚 ライフログ・ダッシュボード</h1>
     <div class="header-right">
-      <span class="ver-badge" id="app-version">v1.11.2</span>
+      <span class="ver-badge" id="app-version">v1.13.0</span>
       <button class="btn-sm" id="btn-check-update" onclick="manualCheckUpdate()" title="最新バージョン確認・更新">🔄 更新</button>
     </div>
   </div>
@@ -491,7 +491,7 @@
 </div>
 
 <script>
-const APP_VERSION = 'v1.11.2';
+const APP_VERSION = 'v1.13.0';
 const GAS_API_URL = 'https://script.google.com/macros/s/AKfycbxLecFd_9FWeR-2w2ThU5SYS7es-0IVKODoLWYgDJGfsoiQzsSRF9IFMAhtZTPl17CDKw/exec';
 
 let watchData = [];
@@ -2049,7 +2049,11 @@ async function submitDiary() {
         renderDiary();
         if (document.getElementById('view-nutrition').style.display !== 'none') renderNutritionView();
       }
-      showToast('日記を保存しました', 'success', null, 2200);
+      if (res.needsDocSync && res.docSyncPayload) {
+        // Googleドキュメント同期はバックグラウンドで非同期実行（UIをブロックしない）
+        apiPost('syncDiaryDoc', res.docSyncPayload).catch(() => {});
+      }
+      showToast('保存しました', 'success', null, 2000);
     } catch (err) {
       diaryData = snapshot;
       renderDiary();

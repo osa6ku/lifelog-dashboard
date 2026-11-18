@@ -1,4 +1,4 @@
-const CACHE_NAME = 'lifelog-dashboard-v1.11.2';
+const CACHE_NAME = 'lifelog-dashboard-v1.13.0';
 const SHELL_ASSETS = [
   './',
   './index.html',
