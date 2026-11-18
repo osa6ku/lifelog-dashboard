@@ -285,9 +285,10 @@ function doGet(e) {
     const full = String((e.parameter && e.parameter.full) || '') === '1';
     return jsonResponse_(getImageDataUrl_(fileId, full));
   }
-  return HtmlService.createHtmlOutputFromFile('index')
+  const dashUrl = 'https://osa6ku.github.io/lifelog-dashboard/';
+  const html = `<!DOCTYPE html><html lang="ja"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>ライフログ・ダッシュボード</title><meta http-equiv="refresh" content="2;url=${dashUrl}"></head><body style="font-family:sans-serif;padding:24px;text-align:center;"><h2>📚 ライフログ・ダッシュボード</h2><p>ダッシュボードは GitHub Pages に移行しました。</p><p><a href="${dashUrl}" style="display:inline-block;padding:12px 20px;background:#1a73e8;color:#fff;border-radius:8px;text-decoration:none;font-weight:700;">ダッシュボードを開く</a></p></body></html>`;
+  return HtmlService.createHtmlOutput(html)
     .setTitle('ライフログ・ダッシュボード')
-    .addMetaTag('viewport', 'width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no')
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
 }
 
@@ -323,11 +324,11 @@ function getWatchEntries() {
   const entries = [];
   for (let i = 1; i < values.length; i++) {
     const r = values[i];
-    if (!r[COL.TITLE - 1]) continue;
+    if (!r[COL.TITLE - 1] && !r[COL.NOTION_URL - 1] && !r[COL.ID - 1]) continue;
     entries.push({
       row: i + 1,
       id: r[COL.ID - 1],
-      title: String(r[COL.TITLE - 1] || ''),
+      title: String(r[COL.TITLE - 1] || '(無題)'),
       category: String(r[COL.CATEGORY - 1] || 'その他'),
       watchDate: formatDateVal_(r[COL.WATCH_DATE - 1]),
       status: String(r[COL.STATUS - 1] || ''),
@@ -613,22 +614,29 @@ function getWeekdayJa_(dateStr) {
 function saveDiaryPhotos_(dateStr, photos) {
   const jpgNames = [];
   const driveUrls = [];
+  const failedPhotos = [];
   let firstFileId = '';
-  if (!photos || photos.length === 0) return { jpgNames, driveUrls, firstFileId };
+  if (!photos || photos.length === 0) return { jpgNames, driveUrls, firstFileId, failedPhotos };
 
   const ym = dateStr.slice(0, 7);
   const ymFolder = getOrCreateSubfolder_(JOURNAL_IMAGES_FOLDER_ID, ym);
   photos.forEach((p, idx) => {
-    const safeName = String(p.name || `photo_${idx + 1}.jpg`).replace(/\.[^.]+$/, '') + '.jpg';
-    const fileName = `${dateStr}_${safeName}`;
-    const bytes = Utilities.base64Decode(p.base64);
-    const blob = Utilities.newBlob(bytes, 'image/jpeg', fileName);
-    const file = ymFolder.createFile(blob);
-    jpgNames.push(fileName);
-    driveUrls.push(`https://drive.google.com/file/d/${file.getId()}/view`);
-    if (!firstFileId) firstFileId = file.getId();
+    const rawName = String((p && p.name) || `photo_${idx + 1}.jpg`);
+    try {
+      if (!p || !p.base64) throw new Error('Empty base64');
+      const safeName = rawName.replace(/\.[^.]+$/, '') + '.jpg';
+      const fileName = `${dateStr}_${safeName}`;
+      const bytes = Utilities.base64Decode(p.base64);
+      const blob = Utilities.newBlob(bytes, 'image/jpeg', fileName);
+      const file = ymFolder.createFile(blob);
+      jpgNames.push(fileName);
+      driveUrls.push(`https://drive.google.com/file/d/${file.getId()}/view`);
+      if (!firstFileId) firstFileId = file.getId();
+    } catch (err) {
+      failedPhotos.push(rawName);
+    }
   });
-  return { jpgNames, driveUrls, firstFileId };
+  return { jpgNames, driveUrls, firstFileId, failedPhotos };
 }
 
 function writeDiaryNutritionCols_(sheet, row, payload) {
@@ -658,12 +666,31 @@ function addDiaryEntry(payload) {
   const body = String(payload.body || '').trim();
   const location = String(payload.location || '').trim();
 
-  // 写真アップロード処理（リサイズ済みBase64を受信して journal_images/YYYY-MM/ へ保存）
-  const { jpgNames, driveUrls, firstFileId } = saveDiaryPhotos_(dateStr, payload.photos || []);
-
   const ss = SpreadsheetApp.openById(DIARY_SS_ID);
   const sheet = ss.getSheetByName(DIARY_SHEET_NAME);
   const lastRow = sheet.getLastRow();
+
+  // 重複登録防止（冪等性：直近30行に同一の日付・タイトル・本文があればスキップ）
+  if (lastRow >= 2) {
+    const checkStart = Math.max(2, lastRow - 29);
+    const recent = sheet.getRange(checkStart, 1, lastRow - checkStart + 1, 6).getValues();
+    for (let i = recent.length - 1; i >= 0; i--) {
+      const r = recent[i];
+      if (formatDateVal_(r[1]) === dateStr && String(r[4] || '').trim() === title && String(r[5] || '').trim() === body) {
+        return {
+          ok: true,
+          deduplicated: true,
+          id: r[0],
+          row: checkStart + i,
+          date: dateStr,
+        };
+      }
+    }
+  }
+
+  // 写真アップロード処理（失敗した写真はスキップし、本体保存は完了させる）
+  const { jpgNames, driveUrls, firstFileId, failedPhotos } = saveDiaryPhotos_(dateStr, payload.photos || []);
+
   const nextId = lastRow >= 2 ? Number(sheet.getRange(lastRow, 1).getValue() || lastRow - 1) + 1 : 1;
   const imageFormula = firstFileId ? `=IMAGE("https://drive.google.com/uc?export=view&id=${firstFileId}")` : '';
   const docId = YEAR_DOC_IDS[year] || '';
@@ -687,23 +714,36 @@ function addDiaryEntry(payload) {
   const insertedRow = sheet.getLastRow();
   writeDiaryNutritionCols_(sheet, insertedRow, payload);
 
-  // 年別ドキュメントへ追記
+  // 年別ドキュメントへ追記（失敗しても本体保存成功を返す）
+  let docSynced = false;
   if (docId) {
-    const doc = DocumentApp.openById(docId);
-    const docBody = doc.getBody();
-    const hText = `${dateStr} (${weekday}) — ${title || '(無題)'}`;
-    docBody.appendParagraph(hText).setHeading(DocumentApp.ParagraphHeading.HEADING2);
-    if (location) docBody.appendParagraph(`📍 場所: ${location.split('\n').join(' → ')}`);
-    if (body) docBody.appendParagraph(body);
-    driveUrls.forEach((u, idx) => {
-      const p = docBody.appendParagraph(`📷 写真: ${jpgNames[idx]}`);
-      p.setLinkUrl(u);
-    });
-    docBody.appendHorizontalRule();
-    doc.saveAndClose();
+    try {
+      const doc = DocumentApp.openById(docId);
+      const docBody = doc.getBody();
+      const hText = `${dateStr} (${weekday}) — ${title || '(無題)'}`;
+      docBody.appendParagraph(hText).setHeading(DocumentApp.ParagraphHeading.HEADING2);
+      if (location) docBody.appendParagraph(`📍 場所: ${location.split('\n').join(' → ')}`);
+      if (body) docBody.appendParagraph(body);
+      driveUrls.forEach((u, idx) => {
+        const p = docBody.appendParagraph(`📷 写真: ${jpgNames[idx]}`);
+        p.setLinkUrl(u);
+      });
+      docBody.appendHorizontalRule();
+      doc.saveAndClose();
+      docSynced = true;
+    } catch (err) {
+      docSynced = false;
+    }
   }
 
-  return { ok: true, id: nextId, row: insertedRow, date: dateStr };
+  return {
+    ok: true,
+    id: nextId,
+    row: insertedRow,
+    date: dateStr,
+    docSynced,
+    failedPhotos,
+  };
 }
 
 function updateDiaryEntry(payload) {

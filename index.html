@@ -9,7 +9,7 @@
   <link rel="manifest" href="./manifest.json">
   <link rel="apple-touch-icon" href="./apple-touch-icon.png">
   <link rel="icon" type="image/png" href="./icon-192.png">
-  <title>ライフログ・ダッシュボード v1.4.0</title>
+  <title>ライフログ・ダッシュボード v1.4.1</title>
   <style>
     :root {
       --bg: #f4f6f9;
@@ -223,7 +223,7 @@
   <div class="header-top">
     <h1 class="app-title">📚 ライフログ・ダッシュボード</h1>
     <div class="header-right">
-      <span class="ver-badge" id="app-version">v1.4.0</span>
+      <span class="ver-badge" id="app-version">v1.4.1</span>
       <button class="btn-sm" id="btn-check-update" onclick="manualCheckUpdate()" title="最新バージョン確認・更新">🔄 更新</button>
     </div>
   </div>
@@ -401,7 +401,7 @@
 </div>
 
 <script>
-const APP_VERSION = 'v1.4.0';
+const APP_VERSION = 'v1.4.1';
 const GAS_API_URL = 'https://script.google.com/macros/s/AKfycbxLecFd_9FWeR-2w2ThU5SYS7es-0IVKODoLWYgDJGfsoiQzsSRF9IFMAhtZTPl17CDKw/exec';
 
 let watchData = [];
@@ -485,9 +485,21 @@ function switchTab(tab) {
   }
 }
 
+async function parseGasResponse(res) {
+  const text = await res.text();
+  if (!res.ok) {
+    throw new Error(`HTTP ${res.status}: ${text.slice(0, 160)}`);
+  }
+  try {
+    return JSON.parse(text);
+  } catch (e) {
+    throw new Error(`応答のJSON解析に失敗しました (${text.slice(0, 120)})`);
+  }
+}
+
 async function apiGet(params) {
   const res = await fetch(`${GAS_API_URL}?${new URLSearchParams(params)}`);
-  return res.json();
+  return parseGasResponse(res);
 }
 
 async function apiPost(action, payload) {
@@ -496,7 +508,7 @@ async function apiPost(action, payload) {
     headers: { 'Content-Type': 'text/plain;charset=utf-8' },
     body: JSON.stringify({ action, payload }),
   });
-  return res.json();
+  return parseGasResponse(res);
 }
 
 async function loadWatchData() {
@@ -1131,46 +1143,50 @@ async function submitWatch() {
   if (!title) { alert('タイトルを入力してください'); return; }
   const btn = document.getElementById('btn-save-watch');
   const isEdit = Boolean(editingWatch);
+  const origLabel = isEdit ? '変更を保存する' : '保存する';
   btn.disabled = true; btn.textContent = isEdit ? '更新中...' : '保存中...';
 
-  const payload = {
-    title,
-    category: document.getElementById('w-cat').value,
-    platform: document.getElementById('w-plat').value,
-    status: document.getElementById('w-status').value,
-    rating: document.getElementById('w-rating').value,
-    watchDate: document.getElementById('w-date').value,
-    memo: document.getElementById('w-memo').value,
-    releaseYear: document.getElementById('w-year').value,
-    cast: document.getElementById('w-cast').value,
-    staff: document.getElementById('w-staff').value,
-    summary: document.getElementById('w-summary').value,
-    relatedUrl: document.getElementById('w-url').value,
-  };
+  try {
+    const payload = {
+      title,
+      category: document.getElementById('w-cat').value,
+      platform: document.getElementById('w-plat').value,
+      status: document.getElementById('w-status').value,
+      rating: document.getElementById('w-rating').value,
+      watchDate: document.getElementById('w-date').value,
+      memo: document.getElementById('w-memo').value,
+      releaseYear: document.getElementById('w-year').value,
+      cast: document.getElementById('w-cast').value,
+      staff: document.getElementById('w-staff').value,
+      summary: document.getElementById('w-summary').value,
+      relatedUrl: document.getElementById('w-url').value,
+    };
 
-  if (isEdit) {
-    payload.row = editingWatch.row;
-    payload.id = editingWatch.id;
-    payload.runWiki = document.getElementById('w-wiki').checked;
-    const res = await apiPost('updateWatchFull', payload);
-    btn.disabled = false; btn.textContent = '変更を保存する';
-    if (!res || !res.ok) {
-      alert('更新に失敗しました: ' + ((res && res.error) || 'Unknown error'));
-      return;
+    if (isEdit) {
+      payload.row = editingWatch.row;
+      payload.id = editingWatch.id;
+      payload.runWiki = document.getElementById('w-wiki').checked;
+      const res = await apiPost('updateWatchFull', payload);
+      if (!res || !res.ok) throw new Error((res && res.error) || '更新に失敗しました');
+      if (res.entry) {
+        const idx = watchData.findIndex(x => x.row === res.entry.row || String(x.id) === String(res.entry.id));
+        if (idx >= 0) watchData[idx] = res.entry;
+      }
+      editingWatch = null;
+      closeModals();
+      renderWatch();
+    } else {
+      payload.autoWiki = document.getElementById('w-wiki').checked;
+      const res = await apiPost('addWatch', payload);
+      if (!res || !res.ok) throw new Error((res && res.error) || '保存に失敗しました');
+      closeModals();
+      loadWatchData();
     }
-    if (res.entry) {
-      const idx = watchData.findIndex(x => x.row === res.entry.row || String(x.id) === String(res.entry.id));
-      if (idx >= 0) watchData[idx] = res.entry;
-    }
-    editingWatch = null;
-    closeModals();
-    renderWatch();
-  } else {
-    payload.autoWiki = document.getElementById('w-wiki').checked;
-    await apiPost('addWatch', payload);
-    btn.disabled = false; btn.textContent = '保存する';
-    closeModals();
-    loadWatchData();
+  } catch (err) {
+    alert(`鑑賞記録の保存中にエラーが発生しました:\n${err.message || err}`);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = origLabel;
   }
 }
 
@@ -1262,51 +1278,71 @@ async function submitDiary() {
 
   const btn = document.getElementById('btn-save-diary');
   const isEdit = Boolean(editingDiary);
-  btn.disabled = true; btn.textContent = isEdit ? '更新中...' : 'アップロード中...';
-  const files = Array.from(document.getElementById('d-photos').files || []);
-  const photos = [];
-  for (const f of files) photos.push(await resizeImageToJpgBase64(f, 1200, 0.8));
+  const origLabel = isEdit ? '変更を保存する' : '日記を保存する';
+  btn.disabled = true; btn.textContent = isEdit ? '更新中...' : '保存中...';
 
-  const payload = {
-    date: document.getElementById('d-date').value,
-    title: document.getElementById('d-title').value,
-    location: diaryLocations.join('\n'),
-    body,
-    photos,
-    mealType: document.getElementById('d-meal-type').value,
-    calories: document.getElementById('d-cal').value,
-    protein: document.getElementById('d-p').value,
-    fat: document.getElementById('d-f').value,
-    carbs: document.getElementById('d-c').value,
-    nutritionAdvice: document.getElementById('d-nut-advice').value,
-  };
+  try {
+    const files = Array.from(document.getElementById('d-photos').files || []);
+    const photos = [];
+    const skippedFiles = [];
+    for (const f of files) {
+      try {
+        btn.textContent = `写真変換中 (${photos.length + skippedFiles.length + 1}/${files.length})...`;
+        photos.push(await resizeImageToJpgBase64(f, 1200, 0.8));
+      } catch (imgErr) {
+        skippedFiles.push(f.name);
+      }
+    }
+    if (skippedFiles.length > 0) {
+      const okToProceed = confirm(`以下の写真はブラウザで変換できなかったためスキップされます（HEIC非対応環境など）:\n${skippedFiles.join(', ')}\n\nこのまま本文・位置情報を保存しますか？`);
+      if (!okToProceed) return;
+    }
 
-  if (isEdit) {
-    payload.row = editingDiary.row;
-    payload.id = editingDiary.id;
-    payload.removeUrls = Array.from(removedPhotoUrls);
-    const res = await apiPost('updateDiary', payload);
-    btn.disabled = false; btn.textContent = '変更を保存する';
-    if (!res || !res.ok) {
-      alert('更新に失敗しました: ' + ((res && res.error) || 'Unknown error'));
-      return;
+    btn.textContent = isEdit ? '更新送信中...' : 'サーバーへ送信中...';
+    const payload = {
+      date: document.getElementById('d-date').value,
+      title: document.getElementById('d-title').value,
+      location: diaryLocations.join('\n'),
+      body,
+      photos,
+      mealType: document.getElementById('d-meal-type').value,
+      calories: document.getElementById('d-cal').value,
+      protein: document.getElementById('d-p').value,
+      fat: document.getElementById('d-f').value,
+      carbs: document.getElementById('d-c').value,
+      nutritionAdvice: document.getElementById('d-nut-advice').value,
+    };
+
+    if (isEdit) {
+      payload.row = editingDiary.row;
+      payload.id = editingDiary.id;
+      payload.removeUrls = Array.from(removedPhotoUrls);
+      const res = await apiPost('updateDiary', payload);
+      if (!res || !res.ok) throw new Error((res && res.error) || '更新に失敗しました');
+      if (res.entry) {
+        const idx = diaryData.findIndex(x => (res.entry.row && x.row === res.entry.row) || String(x.id) === String(res.entry.id));
+        if (idx >= 0) diaryData[idx] = res.entry;
+      }
+      editingDiary = null;
+      closeModals();
+      renderDiary();
+      if (document.getElementById('view-nutrition').style.display !== 'none') renderNutritionView();
+    } else {
+      const res = await apiPost('addDiary', payload);
+      if (!res || !res.ok) throw new Error((res && res.error) || '保存に失敗しました');
+      if (res.failedPhotos && res.failedPhotos.length > 0) {
+        alert(`日記は保存されましたが、以下の写真アップロードに失敗しました:\n${res.failedPhotos.join(', ')}`);
+      }
+      closeModals();
+      switchTab('diary');
+      await loadDiaryData();
     }
-    if (res.entry) {
-      const idx = diaryData.findIndex(x => (res.entry.row && x.row === res.entry.row) || String(x.id) === String(res.entry.id));
-      if (idx >= 0) diaryData[idx] = res.entry;
-    }
-    editingDiary = null;
-    closeModals();
-    renderDiary();
-    if (document.getElementById('view-nutrition').style.display !== 'none') renderNutritionView();
-  } else {
-    const res = await apiPost('addDiary', payload);
-    btn.disabled = false; btn.textContent = '日記を保存する';
-    if (!res || !res.ok) {
-      alert('保存に失敗しました: ' + ((res && res.error) || 'Unknown error'));
-      return;
-    }
-    closeModals(); switchTab('diary'); loadDiaryData();
+  } catch (err) {
+    const msg = err && err.message ? err.message : String(err);
+    alert(`送信処理でエラーまたは応答タイムアウトが発生しました。\n詳細: ${msg}\n\n※GAS側の仕様によりサーバー上では保存が完了している場合があります。タイムラインを再読み込みしてご確認ください。`);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = origLabel;
   }
 }
 
