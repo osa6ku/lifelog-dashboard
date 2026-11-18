@@ -500,7 +500,7 @@ function deleteWatchEntry(payload) {
   return { ok: true, deletedRow: row };
 }
 
-const DIARY_NUTRITION_HEADERS = ['食事区分', '推定カロリー(kcal)', '栄養バランス(PFC・所見)'];
+const DIARY_NUTRITION_HEADERS = ['食事区分', '推定カロリー(kcal)', '栄養バランス(PFC・所見)', '位置情報JSON'];
 
 function getDiaryNutritionCols_(sheet, createIfMissing) {
   const lastCol = Math.max(13, sheet.getLastColumn());
@@ -523,8 +523,39 @@ function getDiaryNutritionCols_(sheet, createIfMissing) {
     mealTypeCol: map['食事区分'],
     caloriesCol: map['推定カロリー(kcal)'],
     nutritionCol: map['栄養バランス(PFC・所見)'],
+    locJsonCol: map['位置情報JSON'],
     totalCols: Math.max(lastCol, nextCol - 1),
   };
+}
+
+function isFiniteCoord_(v) {
+  return v !== '' && v !== null && v !== undefined && !isNaN(Number(v)) && isFinite(Number(v));
+}
+
+function normalizeLocationsPayload_(locText, locationsArr) {
+  if (Array.isArray(locationsArr) && locationsArr.length > 0) {
+    return locationsArr.map(x => {
+      if (typeof x === 'string') return { name: x.trim(), lat: null, lng: null };
+      const name = String((x && x.name) || '').trim();
+      const lat = x && isFiniteCoord_(x.lat) ? Number(x.lat) : null;
+      const lng = x && isFiniteCoord_(x.lng) ? Number(x.lng) : null;
+      return { name, lat, lng };
+    }).filter(x => x.name);
+  }
+  return String(locText || '').split(/\r?\n/).map(s => s.trim()).filter(Boolean).map(name => ({ name, lat: null, lng: null }));
+}
+
+function parseDiaryLocations_(locText, locJsonRaw) {
+  const raw = String(locJsonRaw || '').trim();
+  if (raw) {
+    try {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        return normalizeLocationsPayload_(locText, parsed);
+      }
+    } catch (e) { /* fallback to locText */ }
+  }
+  return normalizeLocationsPayload_(locText, null);
 }
 
 function parseNutritionStr_(raw) {
@@ -565,6 +596,9 @@ function formatDiaryRow_(row, r, cols) {
   const calories = rawCal !== '' && rawCal !== null && rawCal !== undefined && !isNaN(Number(rawCal)) ? Number(rawCal) : '';
   const nutritionRaw = cols.nutritionCol ? String(r[cols.nutritionCol - 1] || '') : '';
   const parsedNut = parseNutritionStr_(nutritionRaw);
+  const locText = String(r[6] || '');
+  const locJsonRaw = cols.locJsonCol ? r[cols.locJsonCol - 1] : '';
+  const locations = parseDiaryLocations_(locText, locJsonRaw);
 
   return {
     row,
@@ -573,7 +607,8 @@ function formatDiaryRow_(row, r, cols) {
     weekday: String(r[2] || ''),
     title: String(r[4] || ''),
     body: String(r[5] || ''),
-    location: String(r[6] || ''),
+    location: locText,
+    locations,
     imageCount: Number(r[7] || 0),
     imageUrls,
     imageIds,
@@ -655,10 +690,11 @@ function saveDiaryPhotos_(dateStr, photos) {
 }
 
 function writeDiaryNutritionCols_(sheet, row, payload) {
-  const hasAny = payload.mealType !== undefined || payload.calories !== undefined ||
+  const hasNutrition = payload.mealType !== undefined || payload.calories !== undefined ||
     payload.protein !== undefined || payload.fat !== undefined || payload.carbs !== undefined ||
     payload.nutritionAdvice !== undefined;
-  if (!hasAny) return;
+  const hasLocs = payload.locations !== undefined;
+  if (!hasNutrition && !hasLocs) return;
   const cols = getDiaryNutritionCols_(sheet, true);
   if (payload.mealType !== undefined && cols.mealTypeCol) {
     sheet.getRange(row, cols.mealTypeCol).setValue(String(payload.mealType || '').trim());
@@ -671,6 +707,11 @@ function writeDiaryNutritionCols_(sheet, row, payload) {
     const nutStr = formatNutritionStr_(payload.protein, payload.fat, payload.carbs, payload.nutritionAdvice);
     sheet.getRange(row, cols.nutritionCol).setValue(nutStr);
   }
+  if (hasLocs && cols.locJsonCol) {
+    const norm = normalizeLocationsPayload_(payload.location, payload.locations);
+    const hasCoords = norm.some(l => l.lat !== null && l.lng !== null);
+    sheet.getRange(row, cols.locJsonCol).setValue(hasCoords ? JSON.stringify(norm) : '');
+  }
 }
 
 function addDiaryEntry(payload) {
@@ -679,7 +720,8 @@ function addDiaryEntry(payload) {
   const weekday = getWeekdayJa_(dateStr);
   const title = String(payload.title || '').trim();
   const body = String(payload.body || '').trim();
-  const location = String(payload.location || '').trim();
+  const normLocs = normalizeLocationsPayload_(payload.location, payload.locations);
+  const location = normLocs.map(l => l.name).join('\n');
 
   const ss = SpreadsheetApp.openById(DIARY_SS_ID);
   const sheet = ss.getSheetByName(DIARY_SHEET_NAME);
@@ -775,7 +817,9 @@ function updateDiaryEntry(payload) {
   const weekday = getWeekdayJa_(dateStr);
   const title = payload.title !== undefined ? String(payload.title).trim() : oldTitle;
   const body = payload.body !== undefined ? String(payload.body).trim() : String(cur[5] || '');
-  const location = payload.location !== undefined ? String(payload.location).trim() : String(cur[6] || '');
+  const location = payload.locations !== undefined
+    ? normalizeLocationsPayload_(payload.location, payload.locations).map(l => l.name).join('\n')
+    : (payload.location !== undefined ? String(payload.location).trim() : String(cur[6] || ''));
 
   sheet.getRange(row, 2).setValue(dateStr);
   sheet.getRange(row, 3).setValue(weekday);

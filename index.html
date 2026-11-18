@@ -9,7 +9,7 @@
   <link rel="manifest" href="./manifest.json">
   <link rel="apple-touch-icon" href="./apple-touch-icon.png">
   <link rel="icon" type="image/png" href="./icon-192.png">
-  <title>ライフログ・ダッシュボード v1.8.0</title>
+  <title>ライフログ・ダッシュボード v1.9.0</title>
   <style>
     :root {
       --bg: #f4f6f9;
@@ -244,7 +244,7 @@
   <div class="header-top">
     <h1 class="app-title">📚 ライフログ・ダッシュボード</h1>
     <div class="header-right">
-      <span class="ver-badge" id="app-version">v1.8.0</span>
+      <span class="ver-badge" id="app-version">v1.9.0</span>
       <button class="btn-sm" id="btn-check-update" onclick="manualCheckUpdate()" title="最新バージョン確認・更新">🔄 更新</button>
     </div>
   </div>
@@ -470,7 +470,7 @@
 </div>
 
 <script>
-const APP_VERSION = 'v1.8.0';
+const APP_VERSION = 'v1.9.0';
 const GAS_API_URL = 'https://script.google.com/macros/s/AKfycbxLecFd_9FWeR-2w2ThU5SYS7es-0IVKODoLWYgDJGfsoiQzsSRF9IFMAhtZTPl17CDKw/exec';
 
 let watchData = [];
@@ -736,13 +736,39 @@ function parseLocations(locStr) {
 
 const MEAL_ORDER = { '朝食': 1, '昼食': 2, '夕食': 3, '間食': 4 };
 
+function normalizeDiaryLocations(d) {
+  if (d && Array.isArray(d.locations) && d.locations.length > 0) {
+    return d.locations.map(x => {
+      if (typeof x === 'string') return { name: x.trim(), lat: null, lng: null };
+      const lat = (x && x.lat !== null && x.lat !== undefined && x.lat !== '' && !isNaN(Number(x.lat))) ? Number(x.lat) : null;
+      const lng = (x && x.lng !== null && x.lng !== undefined && x.lng !== '' && !isNaN(Number(x.lng))) ? Number(x.lng) : null;
+      return { name: String((x && x.name) || '').trim(), lat, lng };
+    }).filter(x => x.name);
+  }
+  return parseLocations(d && d.location).map(name => ({ name, lat: null, lng: null }));
+}
+
 function buildDiaryCardHtml(d) {
   const placeholder = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
   const ids = d.imageIds || [];
   const urls = d.imageUrls || [];
-  const locs = parseLocations(d.location);
+  const locs = normalizeDiaryLocations(d);
+  const coordLocs = locs.filter(l => l.lat !== null && l.lng !== null);
+  let mapLinkHtml = '';
+  if (coordLocs.length === 1) {
+    mapLinkHtml = `<a class="loc-badge" style="background:#ecfdf5;color:#047857;border-color:#a7f3d0;" target="_blank" rel="noopener" href="https://www.google.com/maps/search/?api=1&query=${coordLocs[0].lat},${coordLocs[0].lng}">🗺️ Googleマップで開く</a>`;
+  } else if (coordLocs.length >= 2) {
+    const dirPath = coordLocs.map(l => `${l.lat},${l.lng}`).join('/');
+    mapLinkHtml = `<a class="loc-badge" style="background:#ecfdf5;color:#047857;border-color:#a7f3d0;" target="_blank" rel="noopener" href="https://www.google.com/maps/dir/${dirPath}">🗺️ Googleマップで経路を開く (${coordLocs.length}地点)</a>`;
+  }
   const locHtml = locs.length > 0
-    ? `<div class="meta-row">${locs.map(l => `<a class="loc-badge" target="_blank" rel="noopener" href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(l)}">📍 ${esc(l)}</a>`).join('')}</div>`
+    ? `<div class="meta-row">${locs.map(l => {
+        const hasCoord = l.lat !== null && l.lng !== null;
+        const href = hasCoord
+          ? `https://www.google.com/maps/search/?api=1&query=${l.lat},${l.lng}`
+          : `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(l.name)}`;
+        return `<a class="loc-badge" target="_blank" rel="noopener" title="${hasCoord ? `${l.lat},${l.lng}` : '名称検索'}" href="${href}">📍 ${esc(l.name)}</a>`;
+      }).join('')}${mapLinkHtml}</div>`
     : '';
   const mediaHtml = ids.length > 0
     ? `<div class="thumb-strip">${ids.map((fid, i) => `<img class="thumb-img" data-file-id="${esc(fid)}" src="${placeholder}" alt="写真${i + 1}" onclick="openImagePreview('${esc(fid)}','${esc(urls[i] || '')}')">`).join('')}</div>`
@@ -1033,19 +1059,47 @@ function openEditWatchModal(row, id) {
 function renderLocationChips() {
   const wrap = document.getElementById('d-loc-chips');
   if (!diaryLocations.length) { wrap.innerHTML = ''; return; }
-  wrap.innerHTML = diaryLocations.map((loc, idx) => `
+  wrap.innerHTML = diaryLocations.map((loc, idx) => {
+    const hasCoord = loc.lat !== null && loc.lng !== null;
+    const coordTag = hasCoord
+      ? `<span style="font-size:10px;opacity:0.75;">(${loc.lat.toFixed(4)},${loc.lng.toFixed(4)})</span>`
+      : `<button type="button" onclick="searchCoordsForChip(${idx})" title="この場所の座標を検索して設定">🔍</button>`;
+    return `
     <span class="loc-chip">
-      <span>📍 ${esc(loc)}</span>
+      <span>📍 ${esc(loc.name)}</span>
+      ${coordTag}
       ${idx > 0 ? `<button type="button" onclick="moveDiaryLocation(${idx}, -1)" title="前へ">↑</button>` : ''}
       ${idx < diaryLocations.length - 1 ? `<button type="button" onclick="moveDiaryLocation(${idx}, 1)" title="後ろへ">↓</button>` : ''}
       <button type="button" onclick="removeDiaryLocation(${idx})" title="削除">✕</button>
-    </span>`).join('');
+    </span>`;
+  }).join('');
 }
 
-function addDiaryLocation(name) {
-  const clean = String(name || '').trim();
-  if (!clean) return;
-  if (!diaryLocations.includes(clean)) diaryLocations.push(clean);
+function searchCoordsForChip(idx) {
+  const loc = diaryLocations[idx];
+  if (!loc) return;
+  document.getElementById('d-loc').value = loc.name;
+  searchLocationByKeyword();
+}
+
+function addDiaryLocation(item) {
+  const obj = typeof item === 'string'
+    ? { name: item.trim(), lat: null, lng: null }
+    : {
+        name: String((item && item.name) || '').trim(),
+        lat: (item && item.lat !== null && item.lat !== undefined && !isNaN(Number(item.lat))) ? Number(item.lat) : null,
+        lng: (item && item.lng !== null && item.lng !== undefined && !isNaN(Number(item.lng))) ? Number(item.lng) : null,
+      };
+  if (!obj.name) return;
+  const existingIdx = diaryLocations.findIndex(x => x.name === obj.name);
+  if (existingIdx >= 0) {
+    if (obj.lat !== null && obj.lng !== null) {
+      diaryLocations[existingIdx].lat = obj.lat;
+      diaryLocations[existingIdx].lng = obj.lng;
+    }
+  } else {
+    diaryLocations.push(obj);
+  }
   renderLocationChips();
 }
 
@@ -1133,7 +1187,7 @@ function openEditDiaryModal(row, id) {
   const entry = diaryData.find(x => (row && x.row === row) || String(x.id) === String(id));
   if (!entry) return;
   editingDiary = entry;
-  diaryLocations = parseLocations(entry.location);
+  diaryLocations = normalizeDiaryLocations(entry).map(x => ({ ...x }));
   removedPhotoUrls = new Set();
   document.getElementById('diary-modal-title').textContent = '✏️ 日記を編集';
   document.getElementById('btn-save-diary').textContent = '変更を保存する';
@@ -1375,9 +1429,10 @@ function renderLocationSuggestions(items) {
 function selectLocationCandidate(idx) {
   const it = lastLocationCandidates[idx];
   if (!it) return;
-  addDiaryLocation(it.name);
+  addDiaryLocation({ name: it.name, lat: it.lat !== undefined ? it.lat : null, lng: it.lng !== undefined ? it.lng : null });
   document.getElementById('d-loc').value = '';
-  document.getElementById('loc-status').textContent = `追加済み: ${it.name}（計${diaryLocations.length}件・さらに追加可）`;
+  const coordNote = (it.lat !== null && it.lat !== undefined) ? ' (座標取得済)' : '';
+  document.getElementById('loc-status').textContent = `追加済み: ${it.name}${coordNote}（計${diaryLocations.length}件・さらに追加可）`;
   document.getElementById('loc-suggestions').style.display = 'none';
 }
 
@@ -1410,11 +1465,11 @@ async function fetchNearbyLocations() {
 
     const items = [];
     const seen = new Set();
-    const addCandidate = (name, sub, dist) => {
+    const addCandidate = (name, sub, dist, cLat, cLng) => {
       const clean = String(name || '').trim();
       if (!clean || seen.has(clean)) return;
       seen.add(clean);
-      items.push({ name: clean, sub: sub || '', dist });
+      items.push({ name: clean, sub: sub || '', dist, lat: cLat, lng: cLng });
     };
 
     if (nomRes.status === 'fulfilled' && nomRes.value) {
@@ -1422,9 +1477,9 @@ async function fetchNearbyLocations() {
       const addr = nom.address || {};
       const shortAddr = [addr.city || addr.ward || addr.town || addr.village || '', addr.suburb || addr.quarter || addr.neighbourhood || ''].filter(Boolean).join('');
       const fullAddr = formatAddrSummary(addr);
-      if (nom.name) addCandidate(nom.name, fullAddr || '現在地スポット');
-      if (shortAddr) addCandidate(shortAddr, '現在地の市区町村・町名');
-      if (fullAddr && fullAddr !== shortAddr) addCandidate(fullAddr, '現在地の住所');
+      if (nom.name) addCandidate(nom.name, fullAddr || '現在地スポット', undefined, lat, lon);
+      if (shortAddr) addCandidate(shortAddr, '現在地の市区町村・町名', undefined, lat, lon);
+      if (fullAddr && fullAddr !== shortAddr) addCandidate(fullAddr, '現在地の住所', undefined, lat, lon);
     }
 
     if (ovRes.status === 'fulfilled' && ovRes.value && Array.isArray(ovRes.value.elements)) {
@@ -1434,9 +1489,9 @@ async function fetchNearbyLocations() {
         const tags = el.tags || {};
         const cat = tags.railway || tags.amenity || tags.shop || tags.leisure || tags.tourism || '';
         const dist = (elLat && elLon) ? calcDistanceMeters(lat, lon, elLat, elLon) : 9999;
-        return { name: tags.name, sub: cat ? `周辺スポット (${cat})` : '周辺スポット', dist };
+        return { name: tags.name, sub: cat ? `周辺スポット (${cat})` : '周辺スポット', dist, lat: elLat || lat, lng: elLon || lon };
       }).filter(p => p.name).sort((a, b) => a.dist - b.dist);
-      pois.slice(0, 15).forEach(p => addCandidate(p.name, p.sub, p.dist));
+      pois.slice(0, 15).forEach(p => addCandidate(p.name, p.sub, p.dist, p.lat, p.lng));
     }
 
     if (items.length === 0) {
@@ -1472,7 +1527,9 @@ async function searchLocationByKeyword() {
     const items = (list || []).map(r => {
       const primary = r.name || String(r.display_name || '').split(',')[0].trim();
       const addrSub = formatAddrSummary(r.address) || String(r.display_name || '');
-      return { name: primary, sub: addrSub };
+      const lat = r.lat !== undefined ? Number(r.lat) : null;
+      const lng = r.lon !== undefined ? Number(r.lon) : null;
+      return { name: primary, sub: addrSub, lat, lng };
     }).filter(it => it.name);
 
     if (items.length === 0) {
@@ -1655,7 +1712,8 @@ async function submitDiary() {
     const payload = {
       date: document.getElementById('d-date').value,
       title: document.getElementById('d-title').value,
-      location: diaryLocations.join('\n'),
+      location: diaryLocations.map(l => l.name).join('\n'),
+      locations: diaryLocations,
       body,
       photos,
       mealType: document.getElementById('d-meal-type').value,
