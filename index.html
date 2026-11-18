@@ -9,7 +9,7 @@
   <link rel="manifest" href="./manifest.json">
   <link rel="apple-touch-icon" href="./apple-touch-icon.png">
   <link rel="icon" type="image/png" href="./icon-192.png">
-  <title>ライフログ・ダッシュボード v1.13.1</title>
+  <title>ライフログ・ダッシュボード v1.14.0</title>
   <style>
     :root {
       --bg: #f4f6f9;
@@ -246,6 +246,7 @@
       font-size: 12px; font-weight: 600; box-shadow: 0 6px 20px rgba(0,0,0,0.22);
       align-items: center; justify-content: space-between; gap: 10px;
     }
+    .rich-link { color: var(--primary); text-decoration: underline; word-break: break-all; }
     .toast-box.show { display: flex; }
     .toast-box.error { background: #b91c1c; }
     .toast-box.success { background: #047857; }
@@ -260,7 +261,7 @@
   <div class="header-top">
     <h1 class="app-title">📚 ライフログ・ダッシュボード</h1>
     <div class="header-right">
-      <span class="ver-badge" id="app-version">v1.13.1</span>
+      <span class="ver-badge" id="app-version">v1.14.0</span>
       <button class="btn-sm" id="btn-check-update" onclick="manualCheckUpdate()" title="最新バージョン確認・更新">🔄 更新</button>
     </div>
   </div>
@@ -491,7 +492,7 @@
 </div>
 
 <script>
-const APP_VERSION = 'v1.13.1';
+const APP_VERSION = 'v1.14.0';
 const GAS_API_URL = 'https://script.google.com/macros/s/AKfycbxLecFd_9FWeR-2w2ThU5SYS7es-0IVKODoLWYgDJGfsoiQzsSRF9IFMAhtZTPl17CDKw/exec';
 
 let watchData = [];
@@ -711,8 +712,8 @@ function renderWatch() {
         </div>
         ${item.platform ? `<div class="meta-row"><span class="tag-pill">📺 ${esc(item.platform)}</span></div>` : ''}
         ${item.cast ? `<div class="card-cast">👥 ${esc(item.cast)}</div>` : ''}
-        ${item.summary ? `<div class="card-summary">${esc(item.summary)}</div>` : ''}
-        ${item.memo ? `<div class="card-cast">📝 ${esc(item.memo)}</div>` : ''}
+        ${item.summary ? `<div class="card-summary" style="white-space:pre-wrap;word-break:break-word;">${renderRichText(item.summary)}</div>` : ''}
+        ${item.memo ? `<div class="card-cast" style="white-space:pre-wrap;word-break:break-word;">📝 ${renderRichText(item.memo)}</div>` : ''}
         <div class="card-actions">
           <button class="btn-sm primary" onclick="openEditWatchModal(${item.row}, '${esc(item.id)}')">✏️ 編集</button>
           <button class="btn-sm success" onclick="quickUpdate(${item.row}, {status:'${nextStatus}'})">${nextLabel}</button>
@@ -852,7 +853,7 @@ function buildDiaryCardHtml(d) {
       </div>
       ${locHtml}
       ${mediaHtml}
-      <div class="card-summary" style="white-space:pre-wrap;">${esc(d.body)}</div>
+      <div class="card-summary" style="white-space:pre-wrap;word-break:break-word;">${renderRichText(d.body)}</div>
       ${mealHtml}
       <div class="card-actions">
         <button class="btn-sm primary" onclick="openEditDiaryModal(${Number(d.row || 0)}, '${esc(d.id)}')">✏️ 編集</button>
@@ -2136,6 +2137,105 @@ function resizeImageToJpgBase64(file, maxDim, quality) {
 
 function esc(str) {
   return String(str || '').replace(/[&<>"']/g, s => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[s]));
+}
+
+function consumeBalancedUrl(s, start, isMarkdown, isAngle) {
+  let i = start;
+  let depth = 0;
+  while (i < s.length) {
+    const ch = s[i];
+    if (isAngle) {
+      if (ch === '>' || /[\s<]/.test(ch)) break;
+      if (ch === '(') depth++;
+      else if (ch === ')') {
+        if (depth === 0) break;
+        depth--;
+      }
+    } else {
+      if (/[\s<>]/.test(ch)) break;
+      if (ch === '(') {
+        depth++;
+      } else if (ch === ')') {
+        if (depth === 0) break;
+        depth--;
+      }
+    }
+    i++;
+  }
+  let url = s.slice(start, i);
+  let trail = '';
+  if (!isMarkdown) {
+    const punctM = url.match(/([.,、。!?:;」』】\]]+)$/);
+    if (punctM) {
+      trail = punctM[1];
+      url = url.slice(0, -trail.length);
+    }
+  }
+  let closed = true;
+  let nextIdx = i;
+  if (isMarkdown) {
+    if (isAngle) {
+      if (s[i] === '>' && s[i + 1] === ')') {
+        closed = true;
+        nextIdx = i + 2;
+      } else if (s[i] === ')') {
+        closed = true;
+        nextIdx = i + 1;
+      } else {
+        closed = false;
+        nextIdx = i;
+      }
+    } else {
+      closed = s[i] === ')';
+      nextIdx = closed ? i + 1 : i;
+    }
+  }
+  return { url, nextIdx, trail, closed };
+}
+
+function renderRichText(str) {
+  const s = String(str || '');
+  if (!s) return '';
+  const startRe = /\[([^\]]+)\]\((<?https?:\/\/)|https?:\/\//g;
+  let out = '';
+  let lastIdx = 0;
+  let m;
+  while ((m = startRe.exec(s)) !== null) {
+    if (m.index < lastIdx) continue;
+    if (m.index > lastIdx) {
+      out += esc(s.slice(lastIdx, m.index));
+    }
+    if (m[1] !== undefined) {
+      const label = m[1];
+      const isAngle = m[2].startsWith('<');
+      const urlStart = m.index + label.length + 3 + (isAngle ? 1 : 0);
+      const res = consumeBalancedUrl(s, urlStart, true, isAngle);
+      if (res.closed && res.url) {
+        const cleanUrl = res.url.replace(/\\_/g, '_').trim();
+        out += `<a class="rich-link" href="${esc(cleanUrl)}" target="_blank" rel="noopener noreferrer">${esc(label)}</a>`;
+        lastIdx = res.nextIdx;
+        startRe.lastIndex = lastIdx;
+      } else {
+        out += esc(m[0]);
+        lastIdx = startRe.lastIndex;
+      }
+    } else {
+      const res = consumeBalancedUrl(s, m.index, false, false);
+      if (res.url) {
+        const cleanUrl = res.url.replace(/\\_/g, '_');
+        out += `<a class="rich-link" href="${esc(cleanUrl)}" target="_blank" rel="noopener noreferrer">${esc(res.url)}</a>${esc(res.trail)}`;
+        lastIdx = res.nextIdx;
+        startRe.lastIndex = lastIdx;
+      } else {
+        out += esc(m[0]);
+        lastIdx = startRe.lastIndex;
+      }
+    }
+  }
+  if (lastIdx < s.length) {
+    out += esc(s.slice(lastIdx));
+  }
+  return out;
 }
 </script>
 </body>
