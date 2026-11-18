@@ -14,7 +14,7 @@ const WATCH_SS_ID = '1dvf7aVJA_B8SgkIB1qGzJztZ6hRPiA7SLb0xssY142E';
 const DIARY_SS_ID = '1_UnbcNhxtEkV7vLagxreIeyELbY3NBLU5bS8pp4YQ1A';
 const DIARY_SHEET_NAME = '日記DB';
 const MEAL_SHEET_NAME = '食事記録DB';
-const MEAL_HEADERS = ['ID', '日付', '食事区分', '料理名', '写真URL', '写真ID', 'カロリー(kcal)', 'タンパク質(g)', '脂質(g)', '炭水化物(g)', '所見・メモ', 'データソース'];
+const MEAL_HEADERS = ['ID', '日付', '食事区分', '料理名', '写真URL', '写真ID', 'カロリー(kcal)', 'タンパク質(g)', '脂質(g)', '炭水化物(g)', '塩分(g)', '所見・メモ', 'データソース'];
 const JOURNAL_IMAGES_FOLDER_ID = '1kPfAX4TvDpMwokoinA2ga-nCwoePkLyo';
 const JOURNAL_DOCS_FOLDER_ID = '1GqzKeXduc0UF-3Mb8nihfs3SVMSbOPSI';
 const YEAR_DOC_IDS = {
@@ -1118,13 +1118,43 @@ function ensureMealSheet_() {
     sheet = ss.insertSheet(MEAL_SHEET_NAME);
     sheet.appendRow(MEAL_HEADERS);
     sheet.getRange(1, 1, 1, MEAL_HEADERS.length).setFontWeight('bold');
+    return sheet;
+  }
+  const lastCol = Math.max(1, sheet.getLastColumn());
+  const headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0].map(h => String(h || '').trim());
+  if (!headers.includes('塩分(g)')) {
+    const carbIdx = headers.indexOf('炭水化物(g)');
+    if (carbIdx >= 0) {
+      sheet.insertColumnAfter(carbIdx + 1);
+      sheet.getRange(1, carbIdx + 2).setValue('塩分(g)').setFontWeight('bold');
+    } else {
+      sheet.getRange(1, lastCol + 1).setValue('塩分(g)').setFontWeight('bold');
+    }
   }
   return sheet;
 }
 
-function formatMealRow_(row, r) {
-  const photoUrls = String(r[4] || '').split('\n').filter(Boolean);
-  let photoIds = String(r[5] || '').split('\n').filter(Boolean);
+function getMealColMap_(sheet) {
+  const lastCol = Math.max(MEAL_HEADERS.length, sheet.getLastColumn());
+  const headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0].map(h => String(h || '').trim());
+  const map = {};
+  headers.forEach((h, idx) => {
+    if (h) map[h] = idx;
+  });
+  return { map, totalCols: lastCol };
+}
+
+function numOrEmpty_(val) {
+  return val !== '' && val !== null && val !== undefined && !isNaN(Number(val)) ? Number(val) : '';
+}
+
+function formatMealRow_(row, r, colMap) {
+  const get = (name, fallbackIdx) => {
+    const idx = colMap && colMap[name] !== undefined ? colMap[name] : fallbackIdx;
+    return idx >= 0 && idx < r.length ? r[idx] : '';
+  };
+  const photoUrls = String(get('写真URL', 4) || '').split('\n').filter(Boolean);
+  let photoIds = String(get('写真ID', 5) || '').split('\n').filter(Boolean);
   if (photoIds.length === 0 && photoUrls.length > 0) {
     photoIds = photoUrls.map(u => {
       const m = u.match(/\/d\/([^/]+)/);
@@ -1133,18 +1163,19 @@ function formatMealRow_(row, r) {
   }
   return {
     row,
-    id: r[0],
-    date: formatDateVal_(r[1]),
-    mealType: String(r[2] || '昼食'),
-    dishName: String(r[3] || ''),
+    id: get('ID', 0),
+    date: formatDateVal_(get('日付', 1)),
+    mealType: String(get('食事区分', 2) || '昼食'),
+    dishName: String(get('料理名', 3) || ''),
     photoUrls,
     photoIds,
-    calories: r[6] !== '' && r[6] !== null && r[6] !== undefined ? Number(r[6]) : '',
-    protein: r[7] !== '' && r[7] !== null && r[7] !== undefined ? Number(r[7]) : '',
-    fat: r[8] !== '' && r[8] !== null && r[8] !== undefined ? Number(r[8]) : '',
-    carbs: r[9] !== '' && r[9] !== null && r[9] !== undefined ? Number(r[9]) : '',
-    memo: String(r[10] || ''),
-    source: String(r[11] || 'webapp'),
+    calories: numOrEmpty_(get('カロリー(kcal)', 6)),
+    protein: numOrEmpty_(get('タンパク質(g)', 7)),
+    fat: numOrEmpty_(get('脂質(g)', 8)),
+    carbs: numOrEmpty_(get('炭水化物(g)', 9)),
+    salt: numOrEmpty_(get('塩分(g)', 10)),
+    memo: String(get('所見・メモ', 11) || ''),
+    source: String(get('データソース', 12) || 'webapp'),
   };
 }
 
@@ -1154,12 +1185,13 @@ function getMealEntries() {
   if (!sheet) return [];
   const lastRow = sheet.getLastRow();
   if (lastRow < 2) return [];
-  const values = sheet.getRange(2, 1, lastRow - 1, MEAL_HEADERS.length).getValues();
+  const { map, totalCols } = getMealColMap_(sheet);
+  const values = sheet.getRange(2, 1, lastRow - 1, totalCols).getValues();
   const out = [];
   for (let i = 0; i < values.length; i++) {
     const r = values[i];
-    if (!r[1] && !r[3]) continue;
-    out.push(formatMealRow_(i + 2, r));
+    if (!r[map['日付'] !== undefined ? map['日付'] : 1] && !r[map['料理名'] !== undefined ? map['料理名'] : 3]) continue;
+    out.push(formatMealRow_(i + 2, r, map));
   }
   // 日付降順、同一日内は 朝食→昼食→夕食→間食
   out.sort((a, b) => {
@@ -1169,15 +1201,44 @@ function getMealEntries() {
   return out;
 }
 
+function resolveSaltPayload_(payload) {
+  const raw = payload.salt !== undefined ? payload.salt : payload.sodium;
+  return numOrEmpty_(raw);
+}
+
+function buildMealRowByMap_(colMap, totalCols, fields) {
+  const rowArr = new Array(totalCols).fill('');
+  const set = (name, fallbackIdx, val) => {
+    const idx = colMap[name] !== undefined ? colMap[name] : fallbackIdx;
+    if (idx >= 0 && idx < totalCols) rowArr[idx] = val;
+  };
+  set('ID', 0, fields.id);
+  set('日付', 1, fields.date);
+  set('食事区分', 2, fields.mealType);
+  set('料理名', 3, fields.dishName);
+  set('写真URL', 4, fields.photoUrls);
+  set('写真ID', 5, fields.photoIds);
+  set('カロリー(kcal)', 6, fields.calories);
+  set('タンパク質(g)', 7, fields.protein);
+  set('脂質(g)', 8, fields.fat);
+  set('炭水化物(g)', 9, fields.carbs);
+  set('塩分(g)', 10, fields.salt);
+  set('所見・メモ', 11, fields.memo);
+  set('データソース', 12, fields.source);
+  return rowArr;
+}
+
 function addMealEntry(payload) {
   const sheet = ensureMealSheet_();
+  const { map, totalCols } = getMealColMap_(sheet);
   const dateStr = payload.date || Utilities.formatDate(new Date(), 'Asia/Tokyo', 'yyyy-MM-dd');
   const mealType = String(payload.mealType || '昼食').trim();
   const dishName = String(payload.dishName || '').trim();
   if (!dishName) return { ok: false, error: '料理名を入力してください' };
 
   const lastRow = sheet.getLastRow();
-  const nextId = lastRow >= 2 ? Number(sheet.getRange(lastRow, 1).getValue() || lastRow - 1) + 1 : 1;
+  const idCol = (map['ID'] !== undefined ? map['ID'] : 0) + 1;
+  const nextId = lastRow >= 2 ? Number(sheet.getRange(lastRow, idCol).getValue() || lastRow - 1) + 1 : 1;
 
   const { driveUrls } = saveDiaryPhotos_(dateStr, payload.photos || []);
   const allUrls = [...driveUrls, ...(payload.photoUrls || [])].filter(Boolean);
@@ -1186,37 +1247,43 @@ function addMealEntry(payload) {
     return m ? m[1] : '';
   }).filter(Boolean);
 
-  sheet.appendRow([
-    nextId,
-    dateStr,
+  const rowArr = buildMealRowByMap_(map, totalCols, {
+    id: nextId,
+    date: dateStr,
     mealType,
     dishName,
-    allUrls.join('\n'),
-    allIds.join('\n'),
-    payload.calories !== '' && payload.calories !== undefined ? Number(payload.calories) : '',
-    payload.protein !== '' && payload.protein !== undefined ? Number(payload.protein) : '',
-    payload.fat !== '' && payload.fat !== undefined ? Number(payload.fat) : '',
-    payload.carbs !== '' && payload.carbs !== undefined ? Number(payload.carbs) : '',
-    String(payload.memo || '').trim(),
-    String(payload.source || 'webapp'),
-  ]);
+    photoUrls: allUrls.join('\n'),
+    photoIds: allIds.join('\n'),
+    calories: numOrEmpty_(payload.calories),
+    protein: numOrEmpty_(payload.protein),
+    fat: numOrEmpty_(payload.fat),
+    carbs: numOrEmpty_(payload.carbs),
+    salt: resolveSaltPayload_(payload),
+    memo: String(payload.memo || '').trim(),
+    source: String(payload.source || 'webapp'),
+  });
+
+  sheet.appendRow(rowArr);
   const insertedRow = sheet.getLastRow();
-  const r = sheet.getRange(insertedRow, 1, 1, MEAL_HEADERS.length).getValues()[0];
-  return { ok: true, entry: formatMealRow_(insertedRow, r) };
+  const r = sheet.getRange(insertedRow, 1, 1, totalCols).getValues()[0];
+  return { ok: true, entry: formatMealRow_(insertedRow, r, map) };
 }
 
 function updateMealEntry(payload) {
   const sheet = ensureMealSheet_();
-  const row = resolveRowByIdOrIndex_(sheet, 1, payload.row, payload.id);
+  const { map, totalCols } = getMealColMap_(sheet);
+  const idCol = (map['ID'] !== undefined ? map['ID'] : 0) + 1;
+  const row = resolveRowByIdOrIndex_(sheet, idCol, payload.row, payload.id);
   if (row < 2) return { ok: false, error: 'Meal entry not found' };
 
-  const cur = sheet.getRange(row, 1, 1, MEAL_HEADERS.length).getValues()[0];
-  const dateStr = payload.date ? String(payload.date).slice(0, 10) : formatDateVal_(cur[1]);
-  const mealType = payload.mealType !== undefined ? String(payload.mealType).trim() : String(cur[2] || '昼食');
-  const dishName = payload.dishName !== undefined ? String(payload.dishName).trim() : String(cur[3] || '');
+  const cur = sheet.getRange(row, 1, 1, totalCols).getValues()[0];
+  const prev = formatMealRow_(row, cur, map);
+  const dateStr = payload.date ? String(payload.date).slice(0, 10) : prev.date;
+  const mealType = payload.mealType !== undefined ? String(payload.mealType).trim() : prev.mealType;
+  const dishName = payload.dishName !== undefined ? String(payload.dishName).trim() : prev.dishName;
 
   const removeSet = new Set((payload.removeUrls || []).map(String));
-  const prevUrls = String(cur[4] || '').split('\n').filter(Boolean).filter(u => !removeSet.has(u));
+  const prevUrls = prev.photoUrls.filter(u => !removeSet.has(u));
   const added = saveDiaryPhotos_(dateStr, payload.photos || []);
   const allUrls = [...added.driveUrls, ...prevUrls];
   const allIds = allUrls.map(u => {
@@ -1224,26 +1291,32 @@ function updateMealEntry(payload) {
     return m ? m[1] : '';
   }).filter(Boolean);
 
-  sheet.getRange(row, 2, 1, 10).setValues([[
-    dateStr,
+  const rowArr = buildMealRowByMap_(map, totalCols, {
+    id: prev.id,
+    date: dateStr,
     mealType,
     dishName,
-    allUrls.join('\n'),
-    allIds.join('\n'),
-    payload.calories !== '' && payload.calories !== undefined ? Number(payload.calories) : '',
-    payload.protein !== '' && payload.protein !== undefined ? Number(payload.protein) : '',
-    payload.fat !== '' && payload.fat !== undefined ? Number(payload.fat) : '',
-    payload.carbs !== '' && payload.carbs !== undefined ? Number(payload.carbs) : '',
-    payload.memo !== undefined ? String(payload.memo).trim() : String(cur[10] || ''),
-  ]]);
+    photoUrls: allUrls.join('\n'),
+    photoIds: allIds.join('\n'),
+    calories: payload.calories !== undefined ? numOrEmpty_(payload.calories) : prev.calories,
+    protein: payload.protein !== undefined ? numOrEmpty_(payload.protein) : prev.protein,
+    fat: payload.fat !== undefined ? numOrEmpty_(payload.fat) : prev.fat,
+    carbs: payload.carbs !== undefined ? numOrEmpty_(payload.carbs) : prev.carbs,
+    salt: (payload.salt !== undefined || payload.sodium !== undefined) ? resolveSaltPayload_(payload) : prev.salt,
+    memo: payload.memo !== undefined ? String(payload.memo).trim() : prev.memo,
+    source: prev.source,
+  });
 
-  const r = sheet.getRange(row, 1, 1, MEAL_HEADERS.length).getValues()[0];
-  return { ok: true, entry: formatMealRow_(row, r) };
+  sheet.getRange(row, 1, 1, totalCols).setValues([rowArr]);
+  const r = sheet.getRange(row, 1, 1, totalCols).getValues()[0];
+  return { ok: true, entry: formatMealRow_(row, r, map) };
 }
 
 function deleteMealEntry(payload) {
   const sheet = ensureMealSheet_();
-  const row = resolveRowByIdOrIndex_(sheet, 1, payload.row, payload.id);
+  const { map } = getMealColMap_(sheet);
+  const idCol = (map['ID'] !== undefined ? map['ID'] : 0) + 1;
+  const row = resolveRowByIdOrIndex_(sheet, idCol, payload.row, payload.id);
   if (row < 2) return { ok: false, error: 'Meal entry not found' };
   sheet.deleteRow(row);
   return { ok: true, deletedRow: row };
@@ -1253,13 +1326,19 @@ function importMealsBatch(payload) {
   const items = payload.meals || [];
   if (items.length === 0) return { ok: true, imported: 0, skipped: 0 };
   const sheet = ensureMealSheet_();
+  const { map, totalCols } = getMealColMap_(sheet);
   const lastRow = sheet.getLastRow();
   const existingKeys = new Set();
+  const dIdx = map['日付'] !== undefined ? map['日付'] : 1;
+  const mIdx = map['食事区分'] !== undefined ? map['食事区分'] : 2;
+  const nIdx = map['料理名'] !== undefined ? map['料理名'] : 3;
+  const idCol = (map['ID'] !== undefined ? map['ID'] : 0) + 1;
+
   if (lastRow >= 2) {
-    const vals = sheet.getRange(2, 1, lastRow - 1, 4).getValues();
-    vals.forEach(r => existingKeys.add(`${formatDateVal_(r[1])}|${String(r[2] || '')}|${String(r[3] || '')}`));
+    const vals = sheet.getRange(2, 1, lastRow - 1, totalCols).getValues();
+    vals.forEach(r => existingKeys.add(`${formatDateVal_(r[dIdx])}|${String(r[mIdx] || '')}|${String(r[nIdx] || '')}`));
   }
-  let nextId = lastRow >= 2 ? Number(sheet.getRange(lastRow, 1).getValue() || lastRow - 1) + 1 : 1;
+  let nextId = lastRow >= 2 ? Number(sheet.getRange(lastRow, idCol).getValue() || lastRow - 1) + 1 : 1;
   const rowsToAppend = [];
   let skipped = 0;
 
@@ -1278,24 +1357,25 @@ function importMealsBatch(payload) {
       return m ? m[1] : '';
     }).filter(Boolean));
 
-    rowsToAppend.push([
-      nextId++,
-      dateStr,
+    rowsToAppend.push(buildMealRowByMap_(map, totalCols, {
+      id: nextId++,
+      date: dateStr,
       mealType,
       dishName,
-      urls.join('\n'),
-      ids.join('\n'),
-      it.calories !== '' && it.calories !== undefined ? Number(it.calories) : '',
-      it.protein !== '' && it.protein !== undefined ? Number(it.protein) : '',
-      it.fat !== '' && it.fat !== undefined ? Number(it.fat) : '',
-      it.carbs !== '' && it.carbs !== undefined ? Number(it.carbs) : '',
-      String(it.memo || '').trim(),
-      String(it.source || 'muse'),
-    ]);
+      photoUrls: urls.join('\n'),
+      photoIds: ids.join('\n'),
+      calories: numOrEmpty_(it.calories),
+      protein: numOrEmpty_(it.protein),
+      fat: numOrEmpty_(it.fat),
+      carbs: numOrEmpty_(it.carbs),
+      salt: resolveSaltPayload_(it),
+      memo: String(it.memo || '').trim(),
+      source: String(it.source || 'muse'),
+    }));
   });
 
   if (rowsToAppend.length > 0) {
-    sheet.getRange(sheet.getLastRow() + 1, 1, rowsToAppend.length, MEAL_HEADERS.length).setValues(rowsToAppend);
+    sheet.getRange(sheet.getLastRow() + 1, 1, rowsToAppend.length, totalCols).setValues(rowsToAppend);
   }
   return { ok: true, imported: rowsToAppend.length, skipped };
 }
