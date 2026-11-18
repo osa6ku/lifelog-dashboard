@@ -533,11 +533,11 @@ async function forceAppUpdate() {
     }
     if ('serviceWorker' in navigator) {
       const regs = await navigator.serviceWorker.getRegistrations();
-      await Promise.all(regs.map(r => r.update()));
+      await Promise.all(regs.map(r => r.unregister()));
     }
     sessionStorage.clear();
   } catch (e) { /* ignore */ }
-  location.reload();
+  location.replace(`${location.pathname}?v=${Date.now()}`);
 }
 
 function switchTab(tab) {
