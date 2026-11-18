@@ -14,7 +14,7 @@ const WATCH_SS_ID = '1dvf7aVJA_B8SgkIB1qGzJztZ6hRPiA7SLb0xssY142E';
 const DIARY_SS_ID = '1_UnbcNhxtEkV7vLagxreIeyELbY3NBLU5bS8pp4YQ1A';
 const DIARY_SHEET_NAME = '日記DB';
 const MEAL_SHEET_NAME = '食事記録DB';
-const MEAL_HEADERS = ['ID', '日付', '食事区分', '料理名', '写真URL', '写真ID', 'カロリー(kcal)', 'タンパク質(g)', '脂質(g)', '炭水化物(g)', '塩分(g)', '所見・メモ', 'データソース'];
+const MEAL_HEADERS = ['ID', '日付', '食事区分', '料理名', '写真URL', '写真ID', 'カロリー(kcal)', 'タンパク質(g)', '脂質(g)', '炭水化物(g)', '糖質(g)', '食物繊維(g)', '塩分(g)', '所見・メモ', 'データソース'];
 const JOURNAL_IMAGES_FOLDER_ID = '1kPfAX4TvDpMwokoinA2ga-nCwoePkLyo';
 const JOURNAL_DOCS_FOLDER_ID = '1GqzKeXduc0UF-3Mb8nihfs3SVMSbOPSI';
 const YEAR_DOC_IDS = {
@@ -1111,6 +1111,19 @@ function batchSortDiaryPhotos(payload) {
 
 const MEAL_ORDER = { '朝食': 1, '昼食': 2, '夕食': 3, '間食': 4 };
 
+function insertMealColAfter_(sheet, anchorHeader, newHeader) {
+  const lastCol = Math.max(1, sheet.getLastColumn());
+  const headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0].map(h => String(h || '').trim());
+  if (headers.includes(newHeader)) return;
+  const idx = headers.indexOf(anchorHeader);
+  if (idx >= 0) {
+    sheet.insertColumnAfter(idx + 1);
+    sheet.getRange(1, idx + 2).setValue(newHeader).setFontWeight('bold');
+  } else {
+    sheet.getRange(1, lastCol + 1).setValue(newHeader).setFontWeight('bold');
+  }
+}
+
 function ensureMealSheet_() {
   const ss = SpreadsheetApp.openById(DIARY_SS_ID);
   let sheet = ss.getSheetByName(MEAL_SHEET_NAME);
@@ -1120,17 +1133,9 @@ function ensureMealSheet_() {
     sheet.getRange(1, 1, 1, MEAL_HEADERS.length).setFontWeight('bold');
     return sheet;
   }
-  const lastCol = Math.max(1, sheet.getLastColumn());
-  const headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0].map(h => String(h || '').trim());
-  if (!headers.includes('塩分(g)')) {
-    const carbIdx = headers.indexOf('炭水化物(g)');
-    if (carbIdx >= 0) {
-      sheet.insertColumnAfter(carbIdx + 1);
-      sheet.getRange(1, carbIdx + 2).setValue('塩分(g)').setFontWeight('bold');
-    } else {
-      sheet.getRange(1, lastCol + 1).setValue('塩分(g)').setFontWeight('bold');
-    }
-  }
+  insertMealColAfter_(sheet, '炭水化物(g)', '糖質(g)');
+  insertMealColAfter_(sheet, '糖質(g)', '食物繊維(g)');
+  insertMealColAfter_(sheet, '食物繊維(g)', '塩分(g)');
   return sheet;
 }
 
@@ -1173,9 +1178,11 @@ function formatMealRow_(row, r, colMap) {
     protein: numOrEmpty_(get('タンパク質(g)', 7)),
     fat: numOrEmpty_(get('脂質(g)', 8)),
     carbs: numOrEmpty_(get('炭水化物(g)', 9)),
-    salt: numOrEmpty_(get('塩分(g)', 10)),
-    memo: String(get('所見・メモ', 11) || ''),
-    source: String(get('データソース', 12) || 'webapp'),
+    sugar: numOrEmpty_(get('糖質(g)', 10)),
+    fiber: numOrEmpty_(get('食物繊維(g)', 11)),
+    salt: numOrEmpty_(get('塩分(g)', 12)),
+    memo: String(get('所見・メモ', 13) || ''),
+    source: String(get('データソース', 14) || 'webapp'),
   };
 }
 
@@ -1206,6 +1213,16 @@ function resolveSaltPayload_(payload) {
   return numOrEmpty_(raw);
 }
 
+function resolveSugarPayload_(payload) {
+  const raw = payload.sugar !== undefined ? payload.sugar : (payload.availableCarbs !== undefined ? payload.availableCarbs : payload.carbsAvailable);
+  return numOrEmpty_(raw);
+}
+
+function resolveFiberPayload_(payload) {
+  const raw = payload.fiber !== undefined ? payload.fiber : payload.dietaryFiber;
+  return numOrEmpty_(raw);
+}
+
 function buildMealRowByMap_(colMap, totalCols, fields) {
   const rowArr = new Array(totalCols).fill('');
   const set = (name, fallbackIdx, val) => {
@@ -1222,9 +1239,11 @@ function buildMealRowByMap_(colMap, totalCols, fields) {
   set('タンパク質(g)', 7, fields.protein);
   set('脂質(g)', 8, fields.fat);
   set('炭水化物(g)', 9, fields.carbs);
-  set('塩分(g)', 10, fields.salt);
-  set('所見・メモ', 11, fields.memo);
-  set('データソース', 12, fields.source);
+  set('糖質(g)', 10, fields.sugar);
+  set('食物繊維(g)', 11, fields.fiber);
+  set('塩分(g)', 12, fields.salt);
+  set('所見・メモ', 13, fields.memo);
+  set('データソース', 14, fields.source);
   return rowArr;
 }
 
@@ -1258,6 +1277,8 @@ function addMealEntry(payload) {
     protein: numOrEmpty_(payload.protein),
     fat: numOrEmpty_(payload.fat),
     carbs: numOrEmpty_(payload.carbs),
+    sugar: resolveSugarPayload_(payload),
+    fiber: resolveFiberPayload_(payload),
     salt: resolveSaltPayload_(payload),
     memo: String(payload.memo || '').trim(),
     source: String(payload.source || 'webapp'),
@@ -1302,6 +1323,8 @@ function updateMealEntry(payload) {
     protein: payload.protein !== undefined ? numOrEmpty_(payload.protein) : prev.protein,
     fat: payload.fat !== undefined ? numOrEmpty_(payload.fat) : prev.fat,
     carbs: payload.carbs !== undefined ? numOrEmpty_(payload.carbs) : prev.carbs,
+    sugar: (payload.sugar !== undefined || payload.availableCarbs !== undefined || payload.carbsAvailable !== undefined) ? resolveSugarPayload_(payload) : prev.sugar,
+    fiber: (payload.fiber !== undefined || payload.dietaryFiber !== undefined) ? resolveFiberPayload_(payload) : prev.fiber,
     salt: (payload.salt !== undefined || payload.sodium !== undefined) ? resolveSaltPayload_(payload) : prev.salt,
     memo: payload.memo !== undefined ? String(payload.memo).trim() : prev.memo,
     source: prev.source,
@@ -1368,6 +1391,8 @@ function importMealsBatch(payload) {
       protein: numOrEmpty_(it.protein),
       fat: numOrEmpty_(it.fat),
       carbs: numOrEmpty_(it.carbs),
+      sugar: resolveSugarPayload_(it),
+      fiber: resolveFiberPayload_(it),
       salt: resolveSaltPayload_(it),
       memo: String(it.memo || '').trim(),
       source: String(it.source || 'muse'),
