@@ -9,7 +9,7 @@
   <link rel="manifest" href="./manifest.json">
   <link rel="apple-touch-icon" href="./apple-touch-icon.png">
   <link rel="icon" type="image/png" href="./icon-192.png">
-  <title>ライフログ・ダッシュボード v1.18.0</title>
+  <title>ライフログ・ダッシュボード v1.19.0</title>
   <style>
     :root {
       --bg: #f4f6f9;
@@ -308,7 +308,7 @@
   <div class="header-top">
     <h1 class="app-title">📚 ライフログ・ダッシュボード</h1>
     <div class="header-right">
-      <button type="button" class="ver-badge" id="app-version" onclick="openReleaseNotesModal()" title="変更履歴（リリースノート）を表示">📋 v1.18.0</button>
+      <button type="button" class="ver-badge" id="app-version" onclick="openReleaseNotesModal()" title="変更履歴（リリースノート）を表示">📋 v1.19.0</button>
       <button class="btn-sm" id="btn-check-update" onclick="manualCheckUpdate()" title="最新バージョン確認・更新">🔄 更新</button>
     </div>
   </div>
@@ -557,8 +557,9 @@
 </div>
 
 <script>
-const APP_VERSION = 'v1.18.0';
+const APP_VERSION = 'v1.19.0';
 const DEFAULT_RELEASE_NOTES = [
+  { version: 'v1.19.0', date: '2026-11-19', title: '場所クイック候補「自宅」「会社」のGPS座標＆Googleマップ連携', items: ['「自宅」「会社」のGPS座標（緯度・経度）を非公開スプレッドシート（場所プリセット）から安全に読み込み、公開コードへ個人情報を平文記載せずに座標を自動付与', '「自宅」「会社」のワンタップ追加・手入力時に座標（lat, lng）を確実に保存し、日記カード上の個別バッジや「Googleマップで開く／経路を開く」から座標ベースでGoogleマップを開けるよう対応'] },
   { version: 'v1.18.0', date: '2026-11-19', title: '出演者・監督スタッフのタグ候補＆使用件数表示', items: ['鑑賞記録の編集モーダルおよびカード内インライン編集で「出演者」「監督・スタッフ」入力時に既存表記のタグ候補＋DB実数（例：中谷美紀（12））を提示', '候補選択で既存表記をそのまま挿入し表記揺れを防止（候補にない新規名の自由入力もそのまま保存可能）'] },
   { version: 'v1.17.0', date: '2026-11-19', title: '当日日付初期セット＆場所選択UI改善', items: ['日記・鑑賞記録・食事の新規作成時にローカルタイムゾーン基準の当日日付（YYYY-MM-DD）を自動セット（UTCズレ解消）', '場所入力欄の検索前候補として「自宅」「会社」（座標引き継ぎ対応）＋過去の場所履歴を即時リスト表示', '空欄検索・現在地取得（📍）でGPS近傍スポットをリスト表示・ワンタップ追加できるよう改善'] },
   { version: 'v1.16.0', date: '2026-11-18', title: '変更履歴モーダル＆バージョンボタン化', items: ['ヘッダーのバージョンバッジをタップ可能なボタン（📋 v1.16.0）へ変更', 'v1.0.0〜最新までの変更履歴（リリースノート）を縦スクロール閲覧できるモーダルポップアップを追加'] },
@@ -752,6 +753,13 @@ async function loadWatchData() {
 
 async function loadDiaryData(forceRenderNut) {
   const data = await apiGet({ api: 'diary', limit: '0' });
+  if (Array.isArray(data.locationPresets) && data.locationPresets.length > 0) {
+    serverLocationPresets = data.locationPresets;
+    saveCachedLocationPresets(serverLocationPresets);
+    if (document.getElementById('modal-diary')?.classList.contains('open')) {
+      showLocationHistory();
+    }
+  }
   diaryData = data.entries || [];
   renderDiary();
   if (forceRenderNut || document.getElementById('view-nutrition').style.display !== 'none') {
@@ -1190,15 +1198,22 @@ function parseLocations(locStr) {
 const MEAL_ORDER = { '朝食': 1, '昼食': 2, '夕食': 3, '間食': 4 };
 
 function normalizeDiaryLocations(d) {
+  const attachPreset = (loc) => {
+    if (loc.lat === null || loc.lng === null) {
+      const preset = resolveLocationPresetCoords(loc.name);
+      if (preset) return { name: loc.name, lat: preset.lat, lng: preset.lng };
+    }
+    return loc;
+  };
   if (d && Array.isArray(d.locations) && d.locations.length > 0) {
     return d.locations.map(x => {
-      if (typeof x === 'string') return { name: x.trim(), lat: null, lng: null };
+      if (typeof x === 'string') return attachPreset({ name: x.trim(), lat: null, lng: null });
       const lat = (x && x.lat !== null && x.lat !== undefined && x.lat !== '' && !isNaN(Number(x.lat))) ? Number(x.lat) : null;
       const lng = (x && x.lng !== null && x.lng !== undefined && x.lng !== '' && !isNaN(Number(x.lng))) ? Number(x.lng) : null;
-      return { name: String((x && x.name) || '').trim(), lat, lng };
+      return attachPreset({ name: String((x && x.name) || '').trim(), lat, lng });
     }).filter(x => x.name);
   }
-  return parseLocations(d && d.location).map(name => ({ name, lat: null, lng: null }));
+  return parseLocations(d && d.location).map(name => attachPreset({ name, lat: null, lng: null }));
 }
 
 function formatDiaryDateLabel(dateStr, weekday) {
@@ -1563,10 +1578,17 @@ function addDiaryLocation(item) {
     ? { name: item.trim(), lat: null, lng: null }
     : {
         name: String((item && item.name) || '').trim(),
-        lat: (item && item.lat !== null && item.lat !== undefined && !isNaN(Number(item.lat))) ? Number(item.lat) : null,
-        lng: (item && item.lng !== null && item.lng !== undefined && !isNaN(Number(item.lng))) ? Number(item.lng) : null,
+        lat: (item && item.lat !== null && item.lat !== undefined && item.lat !== '' && !isNaN(Number(item.lat))) ? Number(item.lat) : null,
+        lng: (item && item.lng !== null && item.lng !== undefined && item.lng !== '' && !isNaN(Number(item.lng))) ? Number(item.lng) : null,
       };
   if (!obj.name) return;
+  if (obj.lat === null || obj.lng === null) {
+    const preset = resolveLocationPresetCoords(obj.name);
+    if (preset) {
+      obj.lat = preset.lat;
+      obj.lng = preset.lng;
+    }
+  }
   const existingIdx = diaryLocations.findIndex(x => x.name === obj.name);
   if (existingIdx >= 0) {
     if (obj.lat !== null && obj.lng !== null) {
@@ -1993,10 +2015,57 @@ function saveLocationToHistory(locs) {
   } catch (e) { /* ignore */ }
 }
 
+const LOC_PRESETS_KEY = 'lifelog_loc_presets_v1';
 const QUICK_LOCATION_PRESETS = [
   { name: '自宅', icon: '🏠' },
   { name: '会社', icon: '🏢' },
 ];
+
+function loadCachedLocationPresets() {
+  try {
+    const raw = localStorage.getItem(LOC_PRESETS_KEY);
+    const arr = raw ? JSON.parse(raw) : [];
+    return Array.isArray(arr) ? arr : [];
+  } catch (e) { return []; }
+}
+
+function saveCachedLocationPresets(presets) {
+  try {
+    if (Array.isArray(presets) && presets.length > 0) {
+      localStorage.setItem(LOC_PRESETS_KEY, JSON.stringify(presets));
+    }
+  } catch (e) { /* ignore */ }
+}
+
+let serverLocationPresets = loadCachedLocationPresets();
+
+function getEffectiveLocationPresets() {
+  const byName = new Map();
+  QUICK_LOCATION_PRESETS.forEach(p => {
+    byName.set(p.name, { name: p.name, icon: p.icon || '📍', lat: null, lng: null });
+  });
+  (serverLocationPresets || []).forEach(p => {
+    const name = String((p && p.name) || '').trim();
+    if (!name) return;
+    const lat = (p.lat !== null && p.lat !== undefined && p.lat !== '' && !isNaN(Number(p.lat))) ? Number(p.lat) : null;
+    const lng = (p.lng !== null && p.lng !== undefined && p.lng !== '' && !isNaN(Number(p.lng))) ? Number(p.lng) : null;
+    const existing = byName.get(name);
+    byName.set(name, {
+      name,
+      icon: (p.icon && String(p.icon).trim()) || (existing && existing.icon) || '📍',
+      lat: lat !== null ? lat : (existing ? existing.lat : null),
+      lng: lng !== null ? lng : (existing ? existing.lng : null),
+    });
+  });
+  return Array.from(byName.values());
+}
+
+function resolveLocationPresetCoords(name) {
+  const target = String(name || '').trim();
+  if (!target) return null;
+  const hit = getEffectiveLocationPresets().find(p => p.name === target && p.lat !== null && p.lng !== null);
+  return hit ? { lat: hit.lat, lng: hit.lng } : null;
+}
 
 function getDiaryLocationHistory(query) {
   const q = String(query || '').trim().toLowerCase();
@@ -2014,15 +2083,18 @@ function getDiaryLocationHistory(query) {
   diaryData.forEach(d => normalizeDiaryLocations(d).forEach(recordCoord));
 
   const map = new Map();
-  // 先頭に定番スポット（自宅・会社）を配置（過去の座標があれば自動引き継ぎ）
-  QUICK_LOCATION_PRESETS.forEach(p => {
+  // 先頭に定番スポット（自宅・会社）を配置（非公開シート設定値または過去座標を自動反映）
+  getEffectiveLocationPresets().forEach(p => {
     if (q && !p.name.toLowerCase().includes(q)) return;
-    const coord = allCoords.get(p.name) || { lat: null, lng: null };
+    const hasPresetCoord = p.lat !== null && p.lng !== null;
+    const coord = hasPresetCoord ? { lat: p.lat, lng: p.lng } : (allCoords.get(p.name) || { lat: null, lng: null });
     map.set(p.name, {
       name: p.name,
       lat: coord.lat,
       lng: coord.lng,
-      sub: coord.lat !== null ? `${p.icon} 定番スポット (座標あり)` : `${p.icon} 定番スポット`,
+      sub: coord.lat !== null
+        ? `${p.icon} 定番スポット (座標あり: ${coord.lat.toFixed(4)}, ${coord.lng.toFixed(4)})`
+        : `${p.icon} 定番スポット`,
     });
   });
 

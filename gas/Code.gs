@@ -13,6 +13,7 @@ const SHEET_NAME = '鑑賞記録DB';
 const WATCH_SS_ID = '1dvf7aVJA_B8SgkIB1qGzJztZ6hRPiA7SLb0xssY142E';
 const DIARY_SS_ID = '1_UnbcNhxtEkV7vLagxreIeyELbY3NBLU5bS8pp4YQ1A';
 const DIARY_SHEET_NAME = '日記DB';
+const LOCATION_PRESET_SHEET_NAME = '場所プリセット';
 const MEAL_SHEET_NAME = '食事記録DB';
 const MEAL_HEADERS = ['ID', '日付', '食事区分', '料理名', '写真URL', '写真ID', 'カロリー(kcal)', 'タンパク質(g)', '脂質(g)', '炭水化物(g)', '糖質(g)', '食物繊維(g)', '塩分(g)', '所見・メモ', 'データソース'];
 const JOURNAL_IMAGES_FOLDER_ID = '1kPfAX4TvDpMwokoinA2ga-nCwoePkLyo';
@@ -296,7 +297,12 @@ function doGet(e) {
     const rawLimit = e.parameter && e.parameter.limit;
     const limit = rawLimit !== undefined ? Number(rawLimit) : 0;
     const entries = getDiaryEntries(limit);
-    return jsonResponse_({ ok: true, count: entries.length, entries });
+    const locationPresets = getLocationPresets();
+    return jsonResponse_({ ok: true, count: entries.length, entries, locationPresets });
+  }
+  if (api === 'presets') {
+    const presets = getLocationPresets();
+    return jsonResponse_({ ok: true, count: presets.length, presets });
   }
   if (api === 'meals') {
     const entries = getMealEntries();
@@ -659,6 +665,26 @@ function formatDiaryRow_(row, r, cols) {
     nutritionAdvice: parsedNut.advice,
     nutritionRaw,
   };
+}
+
+function getLocationPresets() {
+  const ss = SpreadsheetApp.openById(DIARY_SS_ID);
+  const sheet = ss.getSheetByName(LOCATION_PRESET_SHEET_NAME);
+  if (!sheet) return [];
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 2) return [];
+  const values = sheet.getRange(2, 1, lastRow - 1, Math.min(4, Math.max(4, sheet.getLastColumn()))).getValues();
+  const out = [];
+  for (let i = 0; i < values.length; i++) {
+    const r = values[i];
+    const name = String(r[0] || '').trim();
+    if (!name) continue;
+    const icon = String(r[1] || '📍').trim() || '📍';
+    const lat = isFiniteCoord_(r[2]) ? Number(r[2]) : null;
+    const lng = isFiniteCoord_(r[3]) ? Number(r[3]) : null;
+    out.push({ name, icon, lat, lng });
+  }
+  return out;
 }
 
 function getDiaryEntries(limit) {
