@@ -9,7 +9,7 @@
   <link rel="manifest" href="./manifest.json">
   <link rel="apple-touch-icon" href="./apple-touch-icon.png">
   <link rel="icon" type="image/png" href="./icon-192.png">
-  <title>ライフログ・ダッシュボード v1.21.0</title>
+  <title>ライフログ・ダッシュボード v1.22.0</title>
   <style>
     :root {
       --bg: #f4f6f9;
@@ -318,6 +318,17 @@
       width: 100%; padding: 7px 10px; border: 1px solid var(--border);
       border-radius: 8px; font-size: 13px; font-family: inherit; box-sizing: border-box;
     }
+    .inline-title-input {
+      width: 100%; padding: 8px 10px; border: 1px solid var(--border);
+      border-radius: 8px; font-size: 15px; font-weight: 700; font-family: inherit;
+      box-sizing: border-box; margin-bottom: 8px; background: #fff; color: var(--text);
+    }
+    .inline-loc-wrap { margin-bottom: 8px; }
+    .inline-loc-row { display: flex; gap: 6px; align-items: center; margin-top: 4px; }
+    .inline-loc-row input {
+      flex: 1; min-width: 0; padding: 7px 10px; border: 1px solid var(--border);
+      border-radius: 8px; font-size: 13px; font-family: inherit; box-sizing: border-box;
+    }
   </style>
 </head>
 <body>
@@ -325,7 +336,7 @@
   <div class="header-top">
     <h1 class="app-title">📚 ライフログ・ダッシュボード</h1>
     <div class="header-right">
-      <button type="button" class="ver-badge" id="app-version" onclick="openReleaseNotesModal()" title="変更履歴（リリースノート）を表示">📋 v1.21.0</button>
+      <button type="button" class="ver-badge" id="app-version" onclick="openReleaseNotesModal()" title="変更履歴（リリースノート）を表示">📋 v1.22.0</button>
       <button class="btn-sm" id="btn-check-update" onclick="manualCheckUpdate()" title="最新バージョン確認・更新">🔄 更新</button>
     </div>
   </div>
@@ -574,8 +585,9 @@
 </div>
 
 <script>
-const APP_VERSION = 'v1.21.0';
+const APP_VERSION = 'v1.22.0';
 const DEFAULT_RELEASE_NOTES = [
+  { version: 'v1.22.0', date: '2026-11-19', title: '日記・鑑賞カード編集UI最適化＆未保存保護', items: ['日記・鑑賞記録のインライン編集中は表示用ボタン行を非表示にし、「保存／キャンセル／詳細」の1行へ一本化', '日記インライン編集にタイトル入力欄および場所スポット（チップ削除・プリセット/履歴追加・重複防止・座標解決維持）を追加', '「⚙️ 日付・写真などの詳細」遷移時・別カード切替時・キャンセル時の未保存変更保護（先保存・失敗時保持）を実装'] },
   { version: 'v1.21.0', date: '2026-11-19', title: 'iPhoneホーム画面PWAのステータスバー重なり解消（safe-area対応）', items: ['viewportメタに viewport-fit=cover を追加し、header上部に env(safe-area-inset-top) を確保してタイトル・更新ボタン・更新バナーがiOSステータスバー領域に重ならないよう修正', 'インセット0のAndroid/Pixel環境では従来どおりのレイアウトを維持'] },
   { version: 'v1.20.0', date: '2026-11-19', title: '旧ブログ2012年日記3件の追加＆iPhoneヘッダー改行崩れ修正', items: ['2012年分の年別アーカイブDocを新設してYEAR_DOC_IDSへ組み込み、旧ブログ「気が向いた時に文章を、」の日記3件（2012-10-25 / 2012-11-01 / 2012-12-15）を原文のまま日記DBへ登録（日付降順ソートも統一）', 'iPhone（幅390px）でタイトル「📚 ライフログ・ダッシュボード」と「🔄 更新」ボタンが折り返す問題を修正（nowrap・flex-shrink:0・レスポンシブフォントサイズ調整）'] },
   { version: 'v1.19.0', date: '2026-11-19', title: '場所クイック候補「自宅」「会社」のGPS座標＆Googleマップ連携', items: ['「自宅」「会社」のGPS座標（緯度・経度）を非公開スプレッドシート（場所プリセット）から安全に読み込み、公開コードへ個人情報を平文記載せずに座標を自動付与', '「自宅」「会社」のワンタップ追加・手入力時に座標（lat, lng）を確実に保存し、日記カード上の個別バッジや「Googleマップで開く／経路を開く」から座標ベースでGoogleマップを開けるよう対応'] },
@@ -859,7 +871,7 @@ function renderWatch() {
           <div class="inline-edit-actions">
             <button class="btn-sm primary" onclick="saveInlineWatch(${item.row})">💾 保存</button>
             <button class="btn-sm" onclick="cancelInlineEdit()">キャンセル</button>
-            <button class="btn-sm" onclick="openDetailFromInline('watch', ${item.row}, '${esc(item.id)}')">⚙️ 詳細項目を編集</button>
+            <button class="btn-sm" onclick="openDetailFromInline('watch', ${item.row}, '${esc(item.id)}')">⚙️ 評価・URLなどの詳細</button>
           </div>
         </div>`
       : (item.memo
@@ -879,19 +891,153 @@ function renderWatch() {
         ${item.cast ? `<div class="card-cast">👥 ${esc(item.cast)}</div>` : ''}
         ${item.summary ? `<div class="card-summary" style="white-space:pre-wrap;word-break:break-word;">${renderRichText(item.summary)}</div>` : ''}
         ${memoHtml}
-        <div class="card-actions">
+        ${isEditing ? '' : `<div class="card-actions">
           <button class="btn-sm primary" onclick="startInlineEdit('watch', ${item.row})">✏️ 編集</button>
           <button class="btn-sm success" onclick="quickUpdate(${item.row}, {status:'${nextStatus}'})">${nextLabel}</button>
           <select class="btn-sm" onchange="if(this.value) quickUpdate(${item.row}, {rating:this.value})">
             <option value="">評価変更</option><option value="5">★5</option><option value="4">★4</option><option value="3">★3</option><option value="2">★2</option><option value="1">★1</option>
           </select>
           <button class="btn-sm" onclick="quickUpdate(${item.row}, {runWiki:true})">🌐 Wikipedia補完</button>
-        </div>
+        </div>`}
       </div>`;
   }).join('');
 }
 
 let activeInlineEdit = null;
+let inlineDiaryLocations = [];
+let inlineDiaryOrigCoords = new Map();
+
+function resolveInlineLocationCoords(name, explicitLat, explicitLng) {
+  const cleanName = String(name || '').trim();
+  // 1. 対象日記の既存スポット座標を最優先
+  if (inlineDiaryOrigCoords.has(cleanName)) {
+    const orig = inlineDiaryOrigCoords.get(cleanName);
+    if (orig && orig.lat !== null && orig.lng !== null) return { lat: orig.lat, lng: orig.lng };
+  }
+  // 候補から明示座標が渡された場合
+  if (explicitLat !== null && explicitLat !== undefined && explicitLat !== '' &&
+      explicitLng !== null && explicitLng !== undefined && explicitLng !== '' &&
+      !isNaN(Number(explicitLat)) && !isNaN(Number(explicitLng))) {
+    return { lat: Number(explicitLat), lng: Number(explicitLng) };
+  }
+  // 2. 場所プリセット（自宅・会社）
+  const preset = resolveLocationPresetCoords(cleanName);
+  if (preset && preset.lat !== null && preset.lng !== null) {
+    return { lat: Number(preset.lat), lng: Number(preset.lng) };
+  }
+  // 3. 過去の場所履歴キャッシュ
+  const hist = getDiaryLocationHistory('');
+  const found = hist.find(h => h.name === cleanName && h.lat !== null && h.lng !== null);
+  if (found) return { lat: Number(found.lat), lng: Number(found.lng) };
+  return { lat: null, lng: null };
+}
+
+function renderInlineDiaryLocChips(rowNum) {
+  const box = document.getElementById(`inline-loc-chips-diary-${Number(rowNum)}`);
+  if (!box) return;
+  if (inlineDiaryLocations.length === 0) {
+    box.innerHTML = '';
+    return;
+  }
+  box.innerHTML = inlineDiaryLocations.map((l, idx) => {
+    const coordTag = (l.lat !== null && l.lng !== null) ? ' title="座標あり"' : '';
+    return `<span class="loc-chip"${coordTag}>📍 ${esc(l.name)}<button type="button" onclick="removeInlineDiaryLocation(${Number(rowNum)}, ${idx})" title="削除">×</button></span>`;
+  }).join('');
+}
+
+function addInlineDiaryLocation(rowNum, rawName, explicitLat, explicitLng) {
+  const name = String(rawName || '').trim();
+  if (!name) return;
+  const input = document.getElementById(`inline-loc-input-diary-${Number(rowNum)}`);
+  const box = document.getElementById(`inline-loc-suggest-diary-${Number(rowNum)}`);
+  if (inlineDiaryLocations.some(l => l.name === name)) {
+    showToast(`「${name}」は既に追加されています`);
+    if (input) input.value = '';
+    if (box) { box.classList.remove('open'); box.innerHTML = ''; }
+    return;
+  }
+  const coords = resolveInlineLocationCoords(name, explicitLat, explicitLng);
+  inlineDiaryLocations.push({ name, lat: coords.lat, lng: coords.lng });
+  renderInlineDiaryLocChips(rowNum);
+  if (input) input.value = '';
+  if (box) { box.classList.remove('open'); box.innerHTML = ''; }
+}
+
+function addInlineDiaryLocationFromInput(rowNum) {
+  const input = document.getElementById(`inline-loc-input-diary-${Number(rowNum)}`);
+  if (!input) return;
+  addInlineDiaryLocation(rowNum, input.value, null, null);
+}
+
+function removeInlineDiaryLocation(rowNum, idx) {
+  inlineDiaryLocations.splice(idx, 1);
+  renderInlineDiaryLocChips(rowNum);
+}
+
+function showInlineDiaryLocSuggestions(rowNum) {
+  const input = document.getElementById(`inline-loc-input-diary-${Number(rowNum)}`);
+  const box = document.getElementById(`inline-loc-suggest-diary-${Number(rowNum)}`);
+  if (!input || !box) return;
+  const q = input.value;
+  const existingNames = new Set(inlineDiaryLocations.map(l => l.name));
+  const cands = getDiaryLocationHistory(q).filter(c => !existingNames.has(c.name)).slice(0, 15);
+  if (cands.length === 0) {
+    box.classList.remove('open');
+    box.innerHTML = '';
+    return;
+  }
+  box.innerHTML = cands.map(c => {
+    const latAttr = (c.lat !== null && c.lat !== undefined) ? String(c.lat) : '';
+    const lngAttr = (c.lng !== null && c.lng !== undefined) ? String(c.lng) : '';
+    const icon = c.name === '自宅' ? '🏠 ' : (c.name === '会社' ? '🏢 ' : '📍 ');
+    return `<button type="button" class="tag-suggest-item" data-loc-name="${esc(c.name)}" data-loc-lat="${esc(latAttr)}" data-loc-lng="${esc(lngAttr)}" onmousedown="event.preventDefault(); addInlineDiaryLocation(${Number(rowNum)}, this.dataset.locName, this.dataset.locLat, this.dataset.locLng)">${icon}${esc(c.name)}</button>`;
+  }).join('');
+  box.classList.add('open');
+}
+
+function hideInlineDiaryLocSuggestions(rowNum) {
+  setTimeout(() => {
+    const box = document.getElementById(`inline-loc-suggest-diary-${Number(rowNum)}`);
+    if (box) box.classList.remove('open');
+  }, 150);
+}
+
+function hasUnsavedInlineChanges() {
+  if (!activeInlineEdit) return false;
+  const { type, row } = activeInlineEdit;
+  if (type === 'diary') {
+    const entry = diaryData.find(d => Number(d.row) === Number(row));
+    if (!entry) return false;
+    const titleEl = document.getElementById(`inline-title-diary-${row}`);
+    const bodyEl = document.getElementById(`inline-ta-diary-${row}`);
+    if (!bodyEl) return false;
+    const curTitle = titleEl ? titleEl.value.trim() : String(entry.title || '').trim();
+    const curBody = bodyEl.value;
+    if (curTitle !== String(entry.title || '').trim()) return true;
+    if (curBody !== String(entry.body || '')) return true;
+    const origLocNames = normalizeDiaryLocations(entry).map(l => l.name);
+    const curLocNames = inlineDiaryLocations.map(l => l.name);
+    if (origLocNames.length !== curLocNames.length) return true;
+    for (let i = 0; i < origLocNames.length; i++) {
+      if (origLocNames[i] !== curLocNames[i]) return true;
+    }
+    return false;
+  }
+  if (type === 'watch') {
+    const item = watchData.find(w => Number(w.row) === Number(row));
+    if (!item) return false;
+    const ta = document.getElementById(`inline-ta-watch-${row}`);
+    if (!ta) return false;
+    if (ta.value !== String(item.memo || '')) return true;
+    const cleanTags = (s) => String(s || '').split(/[,、]/).map(x => x.trim()).filter(Boolean).join(', ');
+    const castEl = document.getElementById(`inline-cast-watch-${row}`);
+    const staffEl = document.getElementById(`inline-staff-watch-${row}`);
+    if (castEl && cleanTags(castEl.value) !== cleanTags(item.cast || '')) return true;
+    if (staffEl && cleanTags(staffEl.value) !== cleanTags(item.staff || '')) return true;
+    return false;
+  }
+  return false;
+}
 
 function renderRelatedUrlBadges(rawUrl) {
   const urls = String(rawUrl || '')
@@ -915,13 +1061,35 @@ function autoResizeTextarea(el, minH = 180) {
   el.style.height = Math.max(el.scrollHeight + 4, minH) + 'px';
 }
 
-function startInlineEdit(type, row, event) {
+async function startInlineEdit(type, row, event) {
   if (event && event.target && event.target.closest('a, button, select, input, textarea')) return;
-  activeInlineEdit = { type, row: Number(row) };
+  const targetRow = Number(row);
+  if (activeInlineEdit && activeInlineEdit.type === type && Number(activeInlineEdit.row) === targetRow) return;
+  if (activeInlineEdit && hasUnsavedInlineChanges()) {
+    const shouldSave = confirm('編集中の未保存内容があります。保存してから切り替えますか？\n（OK：保存して切替 / キャンセル：現在の編集を続ける）');
+    if (!shouldSave) return;
+    const saved = activeInlineEdit.type === 'diary'
+      ? await saveInlineDiary(activeInlineEdit.row, { waitForCommit: true })
+      : await saveInlineWatch(activeInlineEdit.row, { waitForCommit: true });
+    if (!saved) return;
+  }
+  activeInlineEdit = { type, row: targetRow };
+  inlineDiaryLocations = [];
+  inlineDiaryOrigCoords = new Map();
+  if (type === 'diary') {
+    const entry = diaryData.find(d => Number(d.row) === targetRow);
+    if (entry) {
+      const locs = normalizeDiaryLocations(entry);
+      inlineDiaryLocations = locs.map(l => ({ name: l.name, lat: l.lat, lng: l.lng }));
+      locs.forEach(l => {
+        if (l.lat !== null && l.lng !== null) inlineDiaryOrigCoords.set(l.name, { lat: l.lat, lng: l.lng });
+      });
+    }
+  }
   renderDiary();
   renderWatch();
   setTimeout(() => {
-    const ta = document.getElementById(`inline-ta-${type}-${Number(row)}`);
+    const ta = document.getElementById(`inline-ta-${type}-${targetRow}`);
     if (ta) {
       autoResizeTextarea(ta, 180);
       ta.focus();
@@ -932,15 +1100,29 @@ function startInlineEdit(type, row, event) {
 }
 
 function cancelInlineEdit() {
+  if (hasUnsavedInlineChanges()) {
+    if (!confirm('未保存の変更を破棄して元の表示に戻しますか？')) return;
+  }
   activeInlineEdit = null;
+  inlineDiaryLocations = [];
+  inlineDiaryOrigCoords = new Map();
   renderDiary();
   renderWatch();
 }
 
-function openDetailFromInline(type, row, id) {
-  activeInlineEdit = null;
-  renderDiary();
-  renderWatch();
+async function openDetailFromInline(type, row, id) {
+  if (hasUnsavedInlineChanges()) {
+    const ok = type === 'diary'
+      ? await saveInlineDiary(row, { waitForCommit: true })
+      : await saveInlineWatch(row, { waitForCommit: true });
+    if (!ok) return;
+  } else {
+    activeInlineEdit = null;
+    inlineDiaryLocations = [];
+    inlineDiaryOrigCoords = new Map();
+    renderDiary();
+    renderWatch();
+  }
   if (type === 'diary') openEditDiaryModal(row, id);
   else openEditWatchModal(row, id);
 }
@@ -1039,9 +1221,10 @@ function pickWatchTagSuggestion(inputId, boxId, tagName) {
   if (box) { box.classList.remove('open'); box.innerHTML = ''; }
 }
 
-async function saveInlineWatch(row) {
+async function saveInlineWatch(row, opts = {}) {
+  const waitForCommit = Boolean(opts && opts.waitForCommit);
   const ta = document.getElementById(`inline-ta-watch-${Number(row)}`);
-  if (!ta) return;
+  if (!ta) return false;
   const newMemo = ta.value;
   const castEl = document.getElementById(`inline-cast-watch-${Number(row)}`);
   const staffEl = document.getElementById(`inline-staff-watch-${Number(row)}`);
@@ -1050,7 +1233,7 @@ async function saveInlineWatch(row) {
   const newStaff = staffEl ? cleanTags(staffEl.value) : null;
 
   const idx = watchData.findIndex(x => Number(x.row) === Number(row));
-  if (idx < 0) return;
+  if (idx < 0) return false;
   const prevItem = { ...watchData[idx] };
   const payload = { row: prevItem.row, id: prevItem.id, memo: newMemo };
   const nextLocal = { ...prevItem, memo: newMemo };
@@ -1063,17 +1246,23 @@ async function saveInlineWatch(row) {
     nextLocal.staff = newStaff;
   }
 
-  watchData[idx] = nextLocal;
-  activeInlineEdit = null;
-  renderWatch();
-  showToast('保存しました');
+  if (!waitForCommit) {
+    watchData[idx] = nextLocal;
+    activeInlineEdit = null;
+    renderWatch();
+    showToast('保存しました');
+  } else {
+    showToast('変更を保存しています...');
+  }
   try {
     const updated = await apiPost('updateWatch', payload);
     if (!updated || updated.ok === false || !updated.title) {
-      watchData[idx] = prevItem;
-      renderWatch();
+      if (!waitForCommit) {
+        watchData[idx] = prevItem;
+        renderWatch();
+      }
       showToast('保存に失敗しました: ' + ((updated && updated.error) || '通信エラー'), true);
-      return;
+      return false;
     }
     watchData[idx] = {
       ...prevItem,
@@ -1086,48 +1275,92 @@ async function saveInlineWatch(row) {
       relatedUrl: updated.relatedUrl !== undefined ? updated.relatedUrl : prevItem.relatedUrl,
       notionUrl: updated.notionUrl !== undefined ? updated.notionUrl : prevItem.notionUrl,
     };
+    if (waitForCommit) {
+      activeInlineEdit = null;
+      showToast('保存しました');
+    }
     renderWatch();
+    return true;
   } catch (err) {
-    watchData[idx] = prevItem;
-    renderWatch();
+    if (!waitForCommit) {
+      watchData[idx] = prevItem;
+      renderWatch();
+    }
     showToast('保存に失敗しました: ' + err.message, true);
+    return false;
   }
 }
 
-async function saveInlineDiary(row) {
-  const ta = document.getElementById(`inline-ta-diary-${Number(row)}`);
-  if (!ta) return;
+async function saveInlineDiary(row, opts = {}) {
+  const waitForCommit = Boolean(opts && opts.waitForCommit);
+  const rowNum = Number(row);
+  const ta = document.getElementById(`inline-ta-diary-${rowNum}`);
+  if (!ta) return false;
+  const titleEl = document.getElementById(`inline-title-diary-${rowNum}`);
   const newBody = ta.value;
-  const idx = diaryData.findIndex(d => Number(d.row) === Number(row));
-  if (idx < 0) return;
+  const idx = diaryData.findIndex(d => Number(d.row) === rowNum);
+  if (idx < 0) return false;
   const prevEntry = { ...diaryData[idx] };
-  diaryData[idx] = { ...prevEntry, body: newBody };
-  activeInlineEdit = null;
-  renderDiary();
-  showToast('保存しました');
+  const newTitle = titleEl ? titleEl.value.trim() : String(prevEntry.title || '').trim();
+  const resolvedLocs = inlineDiaryLocations.map(l => {
+    const coords = resolveInlineLocationCoords(l.name, l.lat, l.lng);
+    return { name: l.name, lat: coords.lat, lng: coords.lng };
+  });
+  const newLocStr = resolvedLocs.map(l => l.name).join('\n');
+
+  const payload = {
+    row: prevEntry.row,
+    id: prevEntry.id,
+    title: newTitle,
+    body: newBody,
+    location: newLocStr,
+    locations: resolvedLocs,
+  };
+
+  if (!waitForCommit) {
+    diaryData[idx] = { ...prevEntry, title: newTitle, body: newBody, location: newLocStr, locations: resolvedLocs };
+    activeInlineEdit = null;
+    inlineDiaryLocations = [];
+    inlineDiaryOrigCoords = new Map();
+    renderDiary();
+    showToast('保存しました');
+  } else {
+    showToast('変更を保存しています...');
+  }
   try {
-    const res = await apiPost('updateDiary', {
-      row: prevEntry.row,
-      id: prevEntry.id,
-      body: newBody
-    });
+    const res = await apiPost('updateDiary', payload);
     if (!res || !res.ok) {
-      diaryData[idx] = prevEntry;
-      renderDiary();
+      if (!waitForCommit) {
+        diaryData[idx] = prevEntry;
+        renderDiary();
+      }
       showToast('保存に失敗しました: ' + ((res && res.error) || '通信エラー'), true);
-      return;
+      return false;
     }
+    saveLocationToHistory(resolvedLocs);
     if (res.entry) {
       diaryData[idx] = res.entry;
-      renderDiary();
+    } else {
+      diaryData[idx] = { ...prevEntry, title: newTitle, body: newBody, location: newLocStr, locations: resolvedLocs };
     }
+    if (waitForCommit) {
+      activeInlineEdit = null;
+      inlineDiaryLocations = [];
+      inlineDiaryOrigCoords = new Map();
+      showToast('保存しました');
+    }
+    renderDiary();
     if (res.needsDocSync && res.entry) {
       triggerDiaryDocSyncWithRetry({ row: res.entry.row, id: res.entry.id });
     }
+    return true;
   } catch (err) {
-    diaryData[idx] = prevEntry;
-    renderDiary();
+    if (!waitForCommit) {
+      diaryData[idx] = prevEntry;
+      renderDiary();
+    }
     showToast('保存に失敗しました: ' + err.message, true);
+    return false;
   }
 }
 
@@ -1289,13 +1522,28 @@ function buildDiaryCardHtml(d) {
   const titleHtml = cleanTitle ? `<h3 class="card-title">${esc(cleanTitle)}</h3>` : '';
   const rowNum = Number(d.row || 0);
   const isEditing = activeInlineEdit && activeInlineEdit.type === 'diary' && Number(activeInlineEdit.row) === rowNum;
+  const inlineLocChipsHtml = isEditing
+    ? inlineDiaryLocations.map((l, idx) => {
+        const coordTag = (l.lat !== null && l.lng !== null) ? ' title="座標あり"' : '';
+        return `<span class="loc-chip"${coordTag}>📍 ${esc(l.name)}<button type="button" onclick="removeInlineDiaryLocation(${rowNum}, ${idx})" title="削除">×</button></span>`;
+      }).join('')
+    : '';
   const bodyHtml = isEditing
     ? `<div class="inline-edit-wrap">
+        <input id="inline-title-diary-${rowNum}" class="inline-title-input" value="${esc(d.title || '')}" placeholder="タイトル（任意）">
+        <div class="inline-loc-wrap">
+          <div id="inline-loc-chips-diary-${rowNum}" class="loc-chips">${inlineLocChipsHtml}</div>
+          <div class="inline-loc-row">
+            <input id="inline-loc-input-diary-${rowNum}" placeholder="📍 場所を追加（自宅・会社・履歴から選択可）" onfocus="showInlineDiaryLocSuggestions(${rowNum})" oninput="showInlineDiaryLocSuggestions(${rowNum})" onblur="hideInlineDiaryLocSuggestions(${rowNum})" onkeydown="if(event.key==='Enter'){event.preventDefault();addInlineDiaryLocationFromInput(${rowNum});}">
+            <button type="button" class="btn-sm" onclick="addInlineDiaryLocationFromInput(${rowNum})" title="場所を追加">＋</button>
+          </div>
+          <div id="inline-loc-suggest-diary-${rowNum}" class="tag-suggest-box"></div>
+        </div>
         <textarea id="inline-ta-diary-${rowNum}" class="inline-edit-ta" oninput="autoResizeTextarea(this, 180)" placeholder="出来事やメモ...">${esc(d.body || '')}</textarea>
         <div class="inline-edit-actions">
           <button class="btn-sm primary" onclick="saveInlineDiary(${rowNum})">💾 保存</button>
           <button class="btn-sm" onclick="cancelInlineEdit()">キャンセル</button>
-          <button class="btn-sm" onclick="openDetailFromInline('diary', ${rowNum}, '${esc(d.id)}')">⚙️ 詳細項目を編集</button>
+          <button class="btn-sm" onclick="openDetailFromInline('diary', ${rowNum}, '${esc(d.id)}')">⚙️ 日付・写真などの詳細</button>
         </div>
       </div>`
     : `<div class="card-summary editable-text-area" style="white-space:pre-wrap;word-break:break-word;" onclick="startInlineEdit('diary', ${rowNum}, event)">${d.body ? renderRichText(d.body) : '<span style="color:#9ca3af;">タップして本文を追記...</span>'}</div>`;
@@ -1303,17 +1551,17 @@ function buildDiaryCardHtml(d) {
     <div class="card diary-card" id="dcard-${rowNum}">
       <div class="card-header">
         <div class="card-date">${esc(formatDiaryDateLabel(d.date, d.weekday))}</div>
-        ${titleHtml}
+        ${isEditing ? '' : titleHtml}
       </div>
-      ${locHtml}
+      ${isEditing ? '' : locHtml}
       ${mediaHtml}
       ${bodyHtml}
       ${mealHtml}
-      <div class="card-actions">
+      ${isEditing ? '' : `<div class="card-actions">
         <button class="btn-sm primary" onclick="startInlineEdit('diary', ${rowNum})">✏️ 編集</button>
         <button class="btn-sm success" onclick="quickAnalyzeMeal(${rowNum}, '${esc(d.id)}')">🍽️ 栄養分析</button>
         <button class="btn-sm" onclick="openMealModal('${esc(d.date)}')">＋ 食事追加</button>
-      </div>
+      </div>`}
     </div>`;
 }
 
