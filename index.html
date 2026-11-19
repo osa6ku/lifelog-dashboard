@@ -9,7 +9,7 @@
   <link rel="manifest" href="./manifest.json">
   <link rel="apple-touch-icon" href="./apple-touch-icon.png">
   <link rel="icon" type="image/png" href="./icon-192.png">
-  <title>ライフログ・ダッシュボード v1.23.0</title>
+  <title>ライフログ・ダッシュボード v1.24.0</title>
   <style>
     :root {
       --bg: #f4f6f9;
@@ -350,7 +350,7 @@
   <div class="header-top">
     <h1 class="app-title">📚 ライフログ・ダッシュボード</h1>
     <div class="header-right">
-      <button type="button" class="ver-badge" id="app-version" onclick="openReleaseNotesModal()" title="変更履歴（リリースノート）を表示">📋 v1.23.0</button>
+      <button type="button" class="ver-badge" id="app-version" onclick="openReleaseNotesModal()" title="変更履歴（リリースノート）を表示">📋 v1.24.0</button>
       <button class="btn-sm" id="btn-check-update" onclick="manualCheckUpdate()" title="最新バージョン確認・更新">🔄 更新</button>
     </div>
   </div>
@@ -639,8 +639,9 @@
 </div>
 
 <script>
-const APP_VERSION = 'v1.23.0';
+const APP_VERSION = 'v1.24.0';
 const DEFAULT_RELEASE_NOTES = [
+  { version: 'v1.24.0', date: '2026-11-19', title: '横断検索ヒットから記事本体への遷移対応', items: ['横断検索（🌐）のヒットカードをタップするとモーダルを閉じ、該当タブ（日記／鑑賞記録）で対象月の完全なカード（本文全文・写真・編集ボタン）を表示してスクロール＆ハイライト', '鑑賞記録の「完了」作品や古い作品へ遷移時はステータスフィルタを自動解除し段階描画も自動展開', '遷移時に別カードをインライン編集中の場合は3-36の未保存保護ルールを適用'] },
   { version: 'v1.23.0', date: '2026-11-19', title: '検索・閲覧のサーバー側化＆初期取得軽量化', items: ['起動時の初期取得を日記＝直近3か月・鑑賞記録＝直近100件（進行中は全件確実に含む）へ軽量化', 'GAS側での全期間全文検索（日記・鑑賞・横断検索）、DB全体での新しい順／古い順切替、年・月ナビ（年またぎ連続移動＋直近復帰）を実装', '場所履歴および出演者・スタッフ既存タグ候補＋DB実数を軽量マスター配信で全件維持'] },
   { version: 'v1.22.0', date: '2026-11-19', title: '日記・鑑賞カード編集UI最適化＆未保存保護', items: ['日記・鑑賞記録のインライン編集中は表示用ボタン行を非表示にし、「保存／キャンセル／詳細」の1行へ一本化', '日記インライン編集にタイトル入力欄および場所スポット（チップ削除・プリセット/履歴追加・重複防止・座標解決維持）を追加', '「⚙️ 日付・写真などの詳細」遷移時・別カード切替時・キャンセル時の未保存変更保護（先保存・失敗時保持）を実装'] },
   { version: 'v1.21.0', date: '2026-11-19', title: 'iPhoneホーム画面PWAのステータスバー重なり解消（safe-area対応）', items: ['viewportメタに viewport-fit=cover を追加し、header上部に env(safe-area-inset-top) を確保してタイトル・更新ボタン・更新バナーがiOSステータスバー領域に重ならないよう修正', 'インセット0のAndroid/Pixel環境では従来どおりのレイアウトを維持'] },
@@ -1060,6 +1061,8 @@ function resetDiaryQuery() {
   runDiaryServerQuery();
 }
 
+let lastCrossSearchResults = { diary: [], watch: [] };
+
 function openCrossSearch(initialQ) {
   const input = document.getElementById('cross-search-input');
   input.value = String(initialQ || '').trim();
@@ -1078,21 +1081,28 @@ async function execCrossSearch() {
     const res = await apiGet({ api: 'search', q, scope: 'all', limit: '50' });
     const dList = res.diaryEntries || [];
     const wList = res.watchEntries || [];
-    let html = `<div class="count-bar">検索「${esc(q)}」: 日記 ${res.diaryCount || 0}件 / 鑑賞記録 ${res.watchCount || 0}件</div>`;
+    lastCrossSearchResults = { diary: dList, watch: wList };
+    let html = `<div class="count-bar">検索「${esc(q)}」: 日記 ${res.diaryCount || 0}件 / 鑑賞記録 ${res.watchCount || 0}件（タップで記事本体へ移動）</div>`;
     if (dList.length === 0 && wList.length === 0) {
       html += '<div class="loading">該当する記録がありません</div>';
     } else {
       if (dList.length > 0) {
         html += `<h4 style="margin:10px 0 6px;font-size:13px;color:var(--primary);">📓 日記（${dList.length}件表示）</h4>`;
-        html += dList.map(d => `<div class="card" style="padding:10px;margin-bottom:8px;">
-          <div style="font-size:12px;color:var(--muted);">${esc(d.date)} ${esc(d.title || '')}</div>
+        html += dList.map((d, idx) => `<div class="card" role="button" tabindex="0" style="padding:10px;margin-bottom:8px;cursor:pointer;" onclick="openCrossSearchResult('diary', ${idx})">
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:6px;">
+            <span style="font-size:12px;color:var(--muted);font-weight:700;">${esc(d.date)} ${esc(d.title || '')}</span>
+            <span style="font-size:11px;color:var(--primary);font-weight:700;white-space:nowrap;">開く ›</span>
+          </div>
           <div style="font-size:13px;margin-top:4px;white-space:pre-wrap;">${esc(String(d.body || '').slice(0, 140))}</div>
         </div>`).join('');
       }
       if (wList.length > 0) {
         html += `<h4 style="margin:10px 0 6px;font-size:13px;color:#047857;">🎬 鑑賞記録（${wList.length}件表示）</h4>`;
-        html += wList.map(w => `<div class="card" style="padding:10px;margin-bottom:8px;">
-          <div style="font-size:13px;font-weight:700;">${esc(w.title)} <span class="tag-pill">${esc(w.status || '')}</span></div>
+        html += wList.map((w, idx) => `<div class="card" role="button" tabindex="0" style="padding:10px;margin-bottom:8px;cursor:pointer;" onclick="openCrossSearchResult('watch', ${idx})">
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:6px;">
+            <span style="font-size:13px;font-weight:700;">${esc(w.title)} <span class="tag-pill">${esc(w.status || '')}</span></span>
+            <span style="font-size:11px;color:#047857;font-weight:700;white-space:nowrap;">開く ›</span>
+          </div>
           <div style="font-size:12px;color:var(--muted);margin-top:2px;">${esc(w.watchDate || '')} ${w.cast ? '👥 ' + esc(w.cast.slice(0, 60)) : ''}</div>
           ${w.memo ? `<div style="font-size:12px;margin-top:4px;white-space:pre-wrap;">${esc(String(w.memo).slice(0, 120))}</div>` : ''}
         </div>`).join('');
@@ -1101,6 +1111,92 @@ async function execCrossSearch() {
     out.innerHTML = html;
   } catch (err) {
     out.innerHTML = `<div class="loading" style="color:#b91c1c;">検索エラー: ${esc(err.message)}</div>`;
+  }
+}
+
+async function openCrossSearchResult(type, idx) {
+  const entry = type === 'diary' ? lastCrossSearchResults.diary[idx] : lastCrossSearchResults.watch[idx];
+  if (!entry) return;
+
+  // 3-36 未保存保護：別カードをインライン編集中の場合は保存確認してから移動
+  if (activeInlineEdit && hasUnsavedInlineChanges()) {
+    const shouldSave = confirm('編集中の未保存内容があります。保存してから移動しますか？\n（OK：保存して移動 / キャンセル：現在の編集を続ける）');
+    if (!shouldSave) return;
+    const saved = activeInlineEdit.type === 'diary'
+      ? await saveInlineDiary(activeInlineEdit.row, { waitForCommit: true })
+      : await saveInlineWatch(activeInlineEdit.row, { waitForCommit: true });
+    if (!saved) return;
+  } else if (activeInlineEdit) {
+    activeInlineEdit = null;
+    inlineDiaryLocations = [];
+    inlineDiaryOrigCoords = new Map();
+  }
+
+  closeModals();
+  const targetRow = Number(entry.row || 0);
+
+  if (type === 'diary') {
+    switchTab('diary');
+    document.getElementById('diary-search').value = '';
+    const ym = /^\d{4}-\d{2}/.test(String(entry.date || '')) ? String(entry.date).slice(0, 7) : '';
+    diaryPeriodFilter = ym;
+    try {
+      await loadDiaryData(false, { offset: 0, append: false });
+    } catch (err) {
+      showToast('該当期間の読み込みに失敗しました: ' + err.message, true);
+    }
+    if (!diaryData.some(d => Number(d.row) === targetRow)) {
+      diaryData = [entry, ...diaryData];
+    }
+    const sortMode = document.getElementById('diary-sort')?.value || 'desc';
+    const sorted = [...diaryData].sort((a, b) => sortMode === 'asc'
+      ? String(a.date || '').localeCompare(String(b.date || '')) || (Number(a.row || 0) - Number(b.row || 0))
+      : String(b.date || '').localeCompare(String(a.date || '')) || (Number(b.row || 0) - Number(a.row || 0)));
+    const pos = sorted.findIndex(d => Number(d.row) === targetRow);
+    if (pos >= diaryDisplayLimit) diaryDisplayLimit = pos + 10;
+    renderDiary();
+    setTimeout(() => {
+      const cardEl = document.getElementById(`dcard-${targetRow}`);
+      if (cardEl) highlightElement(cardEl);
+    }, 60);
+  } else {
+    switchTab('watch');
+    document.getElementById('watch-search').value = '';
+    // ステータス・区分・PFフィルタを対象記事が見えるよう自動調整
+    if (statusFilter !== 'ALL' && statusFilter !== entry.status) {
+      statusFilter = 'ALL';
+      document.querySelectorAll('#status-chips .chip').forEach(c => {
+        c.classList.toggle('active', c.dataset.val === 'ALL');
+      });
+    }
+    catFilter = 'ALL';
+    platFilter = 'ALL';
+    document.querySelectorAll('#cat-chips .chip').forEach(c => {
+      c.classList.toggle('active-green', c.dataset.val === 'ALL');
+    });
+    const ym = /^\d{4}-\d{2}/.test(String(entry.watchDate || '')) ? String(entry.watchDate).slice(0, 7) : '';
+    watchPeriodFilter = ym;
+    try {
+      await loadWatchData({ offset: 0, append: false });
+    } catch (err) {
+      showToast('該当期間の読み込みに失敗しました: ' + err.message, true);
+    }
+    if (!watchData.some(w => Number(w.row) === targetRow)) {
+      watchData = [entry, ...watchData];
+    }
+    const sortMode = document.getElementById('watch-sort')?.value || 'desc';
+    const sorted = [...watchData].sort((a, b) => {
+      if (sortMode === 'asc') return (a.watchDate || '9999-99-99').localeCompare(b.watchDate || '9999-99-99') || Number(a.id || 0) - Number(b.id || 0);
+      if (sortMode === 'rating_desc') return (Number(b.rating) || 0) - (Number(a.rating) || 0) || String(b.watchDate || '').localeCompare(String(a.watchDate || ''));
+      return String(b.watchDate || '').localeCompare(String(a.watchDate || '')) || Number(b.id || 0) - Number(a.id || 0);
+    });
+    const pos = sorted.findIndex(w => Number(w.row) === targetRow);
+    if (pos >= watchDisplayLimit) watchDisplayLimit = pos + 10;
+    renderWatch();
+    setTimeout(() => {
+      const cardEl = document.getElementById(`wcard-${targetRow}`);
+      if (cardEl) highlightElement(cardEl);
+    }, 60);
   }
 }
 
