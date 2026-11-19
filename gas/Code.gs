@@ -19,6 +19,7 @@ const MEAL_HEADERS = ['ID', '日付', '食事区分', '料理名', '写真URL', 
 const JOURNAL_IMAGES_FOLDER_ID = '1kPfAX4TvDpMwokoinA2ga-nCwoePkLyo';
 const JOURNAL_DOCS_FOLDER_ID = '1GqzKeXduc0UF-3Mb8nihfs3SVMSbOPSI';
 const YEAR_DOC_IDS = {
+  '2012': '1cU3EBa5HnaRnBQq4diBoseawuP_HZxVMvt2a4yOtYKk',
   '2023': '1kq2hbOtbA_oMDdZ9V1Zfduw8gXG3YhQr5K_HS-NfCr8',
   '2024': '1zw5PJeGd0Ez5Z53Q9L337hwqB_zRzEHPn-ti6tsj8l8',
   '2025': '1ad_I1JPnJyvkiIdL_2tAjDA0bearBM5mld9I0bzXyg8',

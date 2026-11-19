@@ -13,6 +13,7 @@ PARSED_JSON = "/tmp/lifelog_work/parsed_entries.json"
 UPLOADED_JSON = "/tmp/lifelog_work/uploaded_images.json"
 
 YEAR_DOC_IDS = {
+    "2012": "1cU3EBa5HnaRnBQq4diBoseawuP_HZxVMvt2a4yOtYKk",
     "2023": "1kq2hbOtbA_oMDdZ9V1Zfduw8gXG3YhQr5K_HS-NfCr8",
     "2024": "1zw5PJeGd0Ez5Z53Q9L337hwqB_zRzEHPn-ti6tsj8l8",
     "2025": "1ad_I1JPnJyvkiIdL_2tAjDA0bearBM5mld9I0bzXyg8",

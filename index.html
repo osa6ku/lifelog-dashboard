@@ -9,7 +9,7 @@
   <link rel="manifest" href="./manifest.json">
   <link rel="apple-touch-icon" href="./apple-touch-icon.png">
   <link rel="icon" type="image/png" href="./icon-192.png">
-  <title>ライフログ・ダッシュボード v1.19.0</title>
+  <title>ライフログ・ダッシュボード v1.20.0</title>
   <style>
     :root {
       --bg: #f4f6f9;
@@ -32,12 +32,13 @@
       background: #ffffff; border-bottom: 1px solid var(--border);
       padding: 10px 14px;
     }
-    .header-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-    .header-right { display: flex; align-items: center; gap: 6px; }
+    .header-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: nowrap; }
+    .header-right { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
     .ver-badge {
       font-size: 11px; font-weight: 700; padding: 3px 9px; border-radius: 999px;
       background: #f3f4f6; color: #374151; border: 1px solid var(--border);
       cursor: pointer; display: inline-flex; align-items: center; gap: 3px;
+      white-space: nowrap; flex-shrink: 0;
       transition: background 0.15s, transform 0.1s;
     }
     .ver-badge:hover { background: #e5e7eb; }
@@ -54,7 +55,17 @@
       padding: 10px 14px; font-size: 13px; font-weight: 700; text-align: center; cursor: pointer;
     }
     .update-banner.show { display: block; }
-    .app-title { font-size: 17px; font-weight: 700; margin: 0; }
+    .app-title {
+      font-size: clamp(13px, 3.6vw, 17px); font-weight: 700; margin: 0;
+      white-space: nowrap; min-width: 0;
+    }
+    @media (max-width: 420px) {
+      header { padding: 10px 12px; }
+      .header-top { gap: 6px; }
+      .header-right { gap: 5px; }
+      .ver-badge { padding: 3px 7px; }
+      .header-right .btn-sm { padding: 5px 8px; }
+    }
     .quick-links { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
     .q-link {
       font-size: 11px; padding: 4px 8px; border-radius: 999px;
@@ -115,6 +126,7 @@
     .btn-sm {
       font-size: 12px; font-weight: 600; padding: 6px 10px; border-radius: 8px;
       border: 1px solid var(--border); background: #fff; cursor: pointer; color: var(--text);
+      white-space: nowrap; flex-shrink: 0;
     }
     .btn-sm.primary { background: #eff6ff; color: #1d4ed8; border-color: #bfdbfe; }
     .btn-sm.success { background: #ecfdf5; color: #047857; border-color: #a7f3d0; }
@@ -308,7 +320,7 @@
   <div class="header-top">
     <h1 class="app-title">📚 ライフログ・ダッシュボード</h1>
     <div class="header-right">
-      <button type="button" class="ver-badge" id="app-version" onclick="openReleaseNotesModal()" title="変更履歴（リリースノート）を表示">📋 v1.19.0</button>
+      <button type="button" class="ver-badge" id="app-version" onclick="openReleaseNotesModal()" title="変更履歴（リリースノート）を表示">📋 v1.20.0</button>
       <button class="btn-sm" id="btn-check-update" onclick="manualCheckUpdate()" title="最新バージョン確認・更新">🔄 更新</button>
     </div>
   </div>
@@ -557,8 +569,9 @@
 </div>
 
 <script>
-const APP_VERSION = 'v1.19.0';
+const APP_VERSION = 'v1.20.0';
 const DEFAULT_RELEASE_NOTES = [
+  { version: 'v1.20.0', date: '2026-11-19', title: '旧ブログ2012年日記3件の追加＆iPhoneヘッダー改行崩れ修正', items: ['2012年分の年別アーカイブDocを新設してYEAR_DOC_IDSへ組み込み、旧ブログ「気が向いた時に文章を、」の日記3件（2012-10-25 / 2012-11-01 / 2012-12-15）を原文のまま日記DBへ登録（日付降順ソートも統一）', 'iPhone（幅390px）でタイトル「📚 ライフログ・ダッシュボード」と「🔄 更新」ボタンが折り返す問題を修正（nowrap・flex-shrink:0・レスポンシブフォントサイズ調整）'] },
   { version: 'v1.19.0', date: '2026-11-19', title: '場所クイック候補「自宅」「会社」のGPS座標＆Googleマップ連携', items: ['「自宅」「会社」のGPS座標（緯度・経度）を非公開スプレッドシート（場所プリセット）から安全に読み込み、公開コードへ個人情報を平文記載せずに座標を自動付与', '「自宅」「会社」のワンタップ追加・手入力時に座標（lat, lng）を確実に保存し、日記カード上の個別バッジや「Googleマップで開く／経路を開く」から座標ベースでGoogleマップを開けるよう対応'] },
   { version: 'v1.18.0', date: '2026-11-19', title: '出演者・監督スタッフのタグ候補＆使用件数表示', items: ['鑑賞記録の編集モーダルおよびカード内インライン編集で「出演者」「監督・スタッフ」入力時に既存表記のタグ候補＋DB実数（例：中谷美紀（12））を提示', '候補選択で既存表記をそのまま挿入し表記揺れを防止（候補にない新規名の自由入力もそのまま保存可能）'] },
   { version: 'v1.17.0', date: '2026-11-19', title: '当日日付初期セット＆場所選択UI改善', items: ['日記・鑑賞記録・食事の新規作成時にローカルタイムゾーン基準の当日日付（YYYY-MM-DD）を自動セット（UTCズレ解消）', '場所入力欄の検索前候補として「自宅」「会社」（座標引き継ぎ対応）＋過去の場所履歴を即時リスト表示', '空欄検索・現在地取得（📍）でGPS近傍スポットをリスト表示・ワンタップ追加できるよう改善'] },
@@ -1310,7 +1323,7 @@ function renderDiary() {
     if (ym && !d.date.startsWith(ym)) return false;
     if (q && !`${d.title} ${d.body} ${d.location} ${d.mealType || ''} ${d.nutritionAdvice || ''}`.toLowerCase().includes(q)) return false;
     return true;
-  });
+  }).sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')) || (Number(b.row || 0) - Number(a.row || 0)));
   const showAll = Boolean(q || ym);
   const sliced = showAll ? list : list.slice(0, diaryDisplayLimit);
   document.getElementById('diary-count').textContent = `表示中: ${sliced.length}件 / 該当${list.length}件（全${diaryData.length}件）`;
