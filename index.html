@@ -9,7 +9,7 @@
   <link rel="manifest" href="./manifest.json">
   <link rel="apple-touch-icon" href="./apple-touch-icon.png">
   <link rel="icon" type="image/png" href="./icon-192.png">
-  <title>ライフログ・ダッシュボード v1.25.0</title>
+  <title>ライフログ・ダッシュボード v1.26.0</title>
   <style>
     :root {
       --bg: #f4f6f9;
@@ -367,7 +367,7 @@
   <div class="header-top">
     <h1 class="app-title">📚 ライフログ・ダッシュボード</h1>
     <div class="header-right">
-      <button type="button" class="ver-badge" id="app-version" onclick="openReleaseNotesModal()" title="変更履歴（リリースノート）を表示">📋 v1.25.0</button>
+      <button type="button" class="ver-badge" id="app-version" onclick="openReleaseNotesModal()" title="変更履歴（リリースノート）を表示">📋 v1.26.0</button>
       <button class="btn-sm" id="btn-check-update" onclick="manualCheckUpdate()" title="最新バージョン確認・更新">🔄 更新</button>
     </div>
   </div>
@@ -660,8 +660,9 @@
 </div>
 
 <script>
-const APP_VERSION = 'v1.25.0';
+const APP_VERSION = 'v1.26.0';
 const DEFAULT_RELEASE_NOTES = [
+  { version: 'v1.26.0', date: '2026-11-19', title: 'Wikipedia補完の区分別曖昧さ回避＆作品記事判定', items: ['Wikipedia補完（GAS側）で区分別の曖昧さ回避記事（例：会社員 (ドラマ)）を優先探索し、一般用語記事（例：サラリーマン）への取り違えを防止', 'リダイレクト解決後のカテゴリ・リード文による作品記事健全性チェックを追加し、作品候補が無い場合は一般用語で埋めず空欄のまま見送り'] },
   { version: 'v1.25.0', date: '2026-11-19', title: '横断検索の結果リストへ戻る導線＆閲覧済マーク', items: ['横断検索ヒットから記事へ遷移後、「← 検索結果に戻る」バーを表示し、再検索通信なしで直前の検索結果・スクロール位置を復元', '「飛ぶ→戻る→別のヒットへ飛ぶ」の繰り返し遷移と、直前閲覧／閲覧済みバッジ表示に対応', 'インライン編集中に「戻る」を押した際の3-36未保存保護ルールに対応'] },
   { version: 'v1.24.0', date: '2026-11-19', title: '横断検索ヒットから記事本体への遷移対応', items: ['横断検索（🌐）のヒットカードをタップするとモーダルを閉じ、該当タブ（日記／鑑賞記録）で対象月の完全なカード（本文全文・写真・編集ボタン）を表示してスクロール＆ハイライト', '鑑賞記録の「完了」作品や古い作品へ遷移時はステータスフィルタを自動解除し段階描画も自動展開', '遷移時に別カードをインライン編集中の場合は3-36の未保存保護ルールを適用'] },
   { version: 'v1.23.0', date: '2026-11-19', title: '検索・閲覧のサーバー側化＆初期取得軽量化', items: ['起動時の初期取得を日記＝直近3か月・鑑賞記録＝直近100件（進行中は全件確実に含む）へ軽量化', 'GAS側での全期間全文検索（日記・鑑賞・横断検索）、DB全体での新しい順／古い順切替、年・月ナビ（年またぎ連続移動＋直近復帰）を実装', '場所履歴および出演者・スタッフ既存タグ候補＋DB実数を軽量マスター配信で全件維持'] },
