@@ -9,7 +9,7 @@
   <link rel="manifest" href="./manifest.json">
   <link rel="apple-touch-icon" href="./apple-touch-icon.png">
   <link rel="icon" type="image/png" href="./icon-192.png">
-  <title>ライフログ・ダッシュボード v1.24.0</title>
+  <title>ライフログ・ダッシュボード v1.25.0</title>
   <style>
     :root {
       --bg: #f4f6f9;
@@ -343,6 +343,23 @@
       background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 999px;
       padding: 2px 8px;
     }
+    .cross-return-bar {
+      display: none; position: sticky; top: 0; z-index: 25;
+      background: #eff6ff; border-bottom: 1px solid #bfdbfe;
+      padding: 8px 12px; align-items: center; justify-content: space-between; gap: 8px;
+    }
+    .cross-return-bar.show { display: flex; }
+    .cross-return-btn {
+      border: 1px solid #93c5fd; background: #fff; color: #1d4ed8;
+      border-radius: 999px; padding: 5px 12px; font-size: 12px; font-weight: 700;
+      cursor: pointer; text-align: left; flex: 1; min-width: 0;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .cross-visited-badge {
+      font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: 999px;
+      background: #dbeafe; color: #1d4ed8; white-space: nowrap;
+    }
+    .cross-visited-badge.done { background: #e5e7eb; color: #4b5563; }
   </style>
 </head>
 <body>
@@ -350,7 +367,7 @@
   <div class="header-top">
     <h1 class="app-title">📚 ライフログ・ダッシュボード</h1>
     <div class="header-right">
-      <button type="button" class="ver-badge" id="app-version" onclick="openReleaseNotesModal()" title="変更履歴（リリースノート）を表示">📋 v1.24.0</button>
+      <button type="button" class="ver-badge" id="app-version" onclick="openReleaseNotesModal()" title="変更履歴（リリースノート）を表示">📋 v1.25.0</button>
       <button class="btn-sm" id="btn-check-update" onclick="manualCheckUpdate()" title="最新バージョン確認・更新">🔄 更新</button>
     </div>
   </div>
@@ -366,6 +383,10 @@
 </header>
 <div id="update-banner" class="update-banner" onclick="forceAppUpdate()">
   ✨ 新しいバージョン（<span id="new-ver-label"></span>）があります — タップして更新
+</div>
+<div id="cross-search-return-bar" class="cross-return-bar">
+  <button type="button" class="cross-return-btn" id="cross-search-return-btn" onclick="returnToCrossSearchResults()">← 検索結果に戻る</button>
+  <button type="button" class="btn-sm" onclick="dismissCrossSearchReturnBar()" title="戻るバーを閉じる">✕</button>
 </div>
 
 <main class="container">
@@ -639,8 +660,9 @@
 </div>
 
 <script>
-const APP_VERSION = 'v1.24.0';
+const APP_VERSION = 'v1.25.0';
 const DEFAULT_RELEASE_NOTES = [
+  { version: 'v1.25.0', date: '2026-11-19', title: '横断検索の結果リストへ戻る導線＆閲覧済マーク', items: ['横断検索ヒットから記事へ遷移後、「← 検索結果に戻る」バーを表示し、再検索通信なしで直前の検索結果・スクロール位置を復元', '「飛ぶ→戻る→別のヒットへ飛ぶ」の繰り返し遷移と、直前閲覧／閲覧済みバッジ表示に対応', 'インライン編集中に「戻る」を押した際の3-36未保存保護ルールに対応'] },
   { version: 'v1.24.0', date: '2026-11-19', title: '横断検索ヒットから記事本体への遷移対応', items: ['横断検索（🌐）のヒットカードをタップするとモーダルを閉じ、該当タブ（日記／鑑賞記録）で対象月の完全なカード（本文全文・写真・編集ボタン）を表示してスクロール＆ハイライト', '鑑賞記録の「完了」作品や古い作品へ遷移時はステータスフィルタを自動解除し段階描画も自動展開', '遷移時に別カードをインライン編集中の場合は3-36の未保存保護ルールを適用'] },
   { version: 'v1.23.0', date: '2026-11-19', title: '検索・閲覧のサーバー側化＆初期取得軽量化', items: ['起動時の初期取得を日記＝直近3か月・鑑賞記録＝直近100件（進行中は全件確実に含む）へ軽量化', 'GAS側での全期間全文検索（日記・鑑賞・横断検索）、DB全体での新しい順／古い順切替、年・月ナビ（年またぎ連続移動＋直近復帰）を実装', '場所履歴および出演者・スタッフ既存タグ候補＋DB実数を軽量マスター配信で全件維持'] },
   { version: 'v1.22.0', date: '2026-11-19', title: '日記・鑑賞カード編集UI最適化＆未保存保護', items: ['日記・鑑賞記録のインライン編集中は表示用ボタン行を非表示にし、「保存／キャンセル／詳細」の1行へ一本化', '日記インライン編集にタイトル入力欄および場所スポット（チップ削除・プリセット/履歴追加・重複防止・座標解決維持）を追加', '「⚙️ 日付・写真などの詳細」遷移時・別カード切替時・キャンセル時の未保存変更保護（先保存・失敗時保持）を実装'] },
@@ -1061,15 +1083,101 @@ function resetDiaryQuery() {
   runDiaryServerQuery();
 }
 
-let lastCrossSearchResults = { diary: [], watch: [] };
+let crossSearchState = {
+  active: false,
+  query: '',
+  diaryCount: 0,
+  watchCount: 0,
+  diary: [],
+  watch: [],
+  scrollTop: 0,
+  visitedKeys: new Set(),
+  lastVisitedKey: '',
+};
+
+function updateCrossSearchReturnBar() {
+  const bar = document.getElementById('cross-search-return-bar');
+  const btn = document.getElementById('cross-search-return-btn');
+  if (!bar || !btn) return;
+  if (crossSearchState.active && crossSearchState.query) {
+    btn.textContent = `← 検索結果に戻る「${crossSearchState.query}」（日記${crossSearchState.diaryCount} / 鑑賞${crossSearchState.watchCount}）`;
+    bar.classList.add('show');
+  } else {
+    bar.classList.remove('show');
+  }
+}
+
+function dismissCrossSearchReturnBar() {
+  crossSearchState.active = false;
+  updateCrossSearchReturnBar();
+}
 
 function openCrossSearch(initialQ) {
   const input = document.getElementById('cross-search-input');
-  input.value = String(initialQ || '').trim();
+  const q = String(initialQ || '').trim();
+  input.value = q;
+  // 新規に横断検索を開く場合のみ表示をクリア
   document.getElementById('cross-search-results').innerHTML = '';
   document.getElementById('modal-cross-search').classList.add('open');
   input.focus();
-  if (input.value) execCrossSearch();
+  if (q) execCrossSearch();
+}
+
+function renderCrossSearchResults() {
+  const out = document.getElementById('cross-search-results');
+  if (!out) return;
+  const q = crossSearchState.query;
+  const dList = crossSearchState.diary || [];
+  const wList = crossSearchState.watch || [];
+  let html = `<div class="count-bar">検索「${esc(q)}」: 日記 ${crossSearchState.diaryCount || 0}件 / 鑑賞記録 ${crossSearchState.watchCount || 0}件（タップで記事本体へ移動）</div>`;
+  if (dList.length === 0 && wList.length === 0) {
+    html += '<div class="loading">該当する記録がありません</div>';
+  } else {
+    if (dList.length > 0) {
+      html += `<h4 style="margin:10px 0 6px;font-size:13px;color:var(--primary);">📓 日記（${dList.length}件表示）</h4>`;
+      html += dList.map((d, idx) => {
+        const key = `diary:${idx}`;
+        const isLast = crossSearchState.lastVisitedKey === key;
+        const isVisited = crossSearchState.visitedKeys.has(key);
+        const cardStyle = isLast
+          ? 'padding:10px;margin-bottom:8px;cursor:pointer;border:2px solid var(--primary);background:#eff6ff;'
+          : 'padding:10px;margin-bottom:8px;cursor:pointer;';
+        const badge = isLast
+          ? '<span class="cross-visited-badge">👁️ 直前閲覧</span>'
+          : (isVisited ? '<span class="cross-visited-badge done">✓ 閲覧済</span>' : '');
+        return `<div class="card" role="button" tabindex="0" style="${cardStyle}" onclick="openCrossSearchResult('diary', ${idx})">
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:6px;">
+            <span style="font-size:12px;color:var(--muted);font-weight:700;">${esc(d.date)} ${esc(d.title || '')}</span>
+            <span style="display:inline-flex;align-items:center;gap:4px;">${badge}<span style="font-size:11px;color:var(--primary);font-weight:700;white-space:nowrap;">開く ›</span></span>
+          </div>
+          <div style="font-size:13px;margin-top:4px;white-space:pre-wrap;">${esc(String(d.body || '').slice(0, 140))}</div>
+        </div>`;
+      }).join('');
+    }
+    if (wList.length > 0) {
+      html += `<h4 style="margin:10px 0 6px;font-size:13px;color:#047857;">🎬 鑑賞記録（${wList.length}件表示）</h4>`;
+      html += wList.map((w, idx) => {
+        const key = `watch:${idx}`;
+        const isLast = crossSearchState.lastVisitedKey === key;
+        const isVisited = crossSearchState.visitedKeys.has(key);
+        const cardStyle = isLast
+          ? 'padding:10px;margin-bottom:8px;cursor:pointer;border:2px solid #047857;background:#ecfdf5;'
+          : 'padding:10px;margin-bottom:8px;cursor:pointer;';
+        const badge = isLast
+          ? '<span class="cross-visited-badge" style="background:#d1fae5;color:#047857;">👁️ 直前閲覧</span>'
+          : (isVisited ? '<span class="cross-visited-badge done">✓ 閲覧済</span>' : '');
+        return `<div class="card" role="button" tabindex="0" style="${cardStyle}" onclick="openCrossSearchResult('watch', ${idx})">
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:6px;">
+            <span style="font-size:13px;font-weight:700;">${esc(w.title)} <span class="tag-pill">${esc(w.status || '')}</span></span>
+            <span style="display:inline-flex;align-items:center;gap:4px;">${badge}<span style="font-size:11px;color:#047857;font-weight:700;white-space:nowrap;">開く ›</span></span>
+          </div>
+          <div style="font-size:12px;color:var(--muted);margin-top:2px;">${esc(w.watchDate || '')} ${w.cast ? '👥 ' + esc(w.cast.slice(0, 60)) : ''}</div>
+          ${w.memo ? `<div style="font-size:12px;margin-top:4px;white-space:pre-wrap;">${esc(String(w.memo).slice(0, 120))}</div>` : ''}
+        </div>`;
+      }).join('');
+    }
+  }
+  out.innerHTML = html;
 }
 
 async function execCrossSearch() {
@@ -1079,43 +1187,50 @@ async function execCrossSearch() {
   out.innerHTML = '<div class="loading">全期間から横断検索中...</div>';
   try {
     const res = await apiGet({ api: 'search', q, scope: 'all', limit: '50' });
-    const dList = res.diaryEntries || [];
-    const wList = res.watchEntries || [];
-    lastCrossSearchResults = { diary: dList, watch: wList };
-    let html = `<div class="count-bar">検索「${esc(q)}」: 日記 ${res.diaryCount || 0}件 / 鑑賞記録 ${res.watchCount || 0}件（タップで記事本体へ移動）</div>`;
-    if (dList.length === 0 && wList.length === 0) {
-      html += '<div class="loading">該当する記録がありません</div>';
-    } else {
-      if (dList.length > 0) {
-        html += `<h4 style="margin:10px 0 6px;font-size:13px;color:var(--primary);">📓 日記（${dList.length}件表示）</h4>`;
-        html += dList.map((d, idx) => `<div class="card" role="button" tabindex="0" style="padding:10px;margin-bottom:8px;cursor:pointer;" onclick="openCrossSearchResult('diary', ${idx})">
-          <div style="display:flex;justify-content:space-between;align-items:center;gap:6px;">
-            <span style="font-size:12px;color:var(--muted);font-weight:700;">${esc(d.date)} ${esc(d.title || '')}</span>
-            <span style="font-size:11px;color:var(--primary);font-weight:700;white-space:nowrap;">開く ›</span>
-          </div>
-          <div style="font-size:13px;margin-top:4px;white-space:pre-wrap;">${esc(String(d.body || '').slice(0, 140))}</div>
-        </div>`).join('');
-      }
-      if (wList.length > 0) {
-        html += `<h4 style="margin:10px 0 6px;font-size:13px;color:#047857;">🎬 鑑賞記録（${wList.length}件表示）</h4>`;
-        html += wList.map((w, idx) => `<div class="card" role="button" tabindex="0" style="padding:10px;margin-bottom:8px;cursor:pointer;" onclick="openCrossSearchResult('watch', ${idx})">
-          <div style="display:flex;justify-content:space-between;align-items:center;gap:6px;">
-            <span style="font-size:13px;font-weight:700;">${esc(w.title)} <span class="tag-pill">${esc(w.status || '')}</span></span>
-            <span style="font-size:11px;color:#047857;font-weight:700;white-space:nowrap;">開く ›</span>
-          </div>
-          <div style="font-size:12px;color:var(--muted);margin-top:2px;">${esc(w.watchDate || '')} ${w.cast ? '👥 ' + esc(w.cast.slice(0, 60)) : ''}</div>
-          ${w.memo ? `<div style="font-size:12px;margin-top:4px;white-space:pre-wrap;">${esc(String(w.memo).slice(0, 120))}</div>` : ''}
-        </div>`).join('');
-      }
-    }
-    out.innerHTML = html;
+    crossSearchState = {
+      active: false,
+      query: q,
+      diaryCount: Number(res.diaryCount || 0),
+      watchCount: Number(res.watchCount || 0),
+      diary: res.diaryEntries || [],
+      watch: res.watchEntries || [],
+      scrollTop: 0,
+      visitedKeys: new Set(),
+      lastVisitedKey: '',
+    };
+    updateCrossSearchReturnBar();
+    renderCrossSearchResults();
+    out.scrollTop = 0;
   } catch (err) {
     out.innerHTML = `<div class="loading" style="color:#b91c1c;">検索エラー: ${esc(err.message)}</div>`;
   }
 }
 
+async function returnToCrossSearchResults() {
+  if (!crossSearchState.query) return;
+  // 3-36 未保存保護：インライン編集中に戻るを押した場合
+  if (activeInlineEdit && hasUnsavedInlineChanges()) {
+    const shouldSave = confirm('編集中の未保存内容があります。保存してから検索結果に戻りますか？\n（OK：保存して戻る / キャンセル：現在の編集を続ける）');
+    if (!shouldSave) return;
+    const saved = activeInlineEdit.type === 'diary'
+      ? await saveInlineDiary(activeInlineEdit.row, { waitForCommit: true })
+      : await saveInlineWatch(activeInlineEdit.row, { waitForCommit: true });
+    if (!saved) return;
+  }
+  const input = document.getElementById('cross-search-input');
+  const out = document.getElementById('cross-search-results');
+  if (input) input.value = crossSearchState.query;
+  // 再検索の通信は一切発生させず、保持済みデータからそのまま復元
+  renderCrossSearchResults();
+  document.getElementById('modal-cross-search').classList.add('open');
+  const savedScroll = Number(crossSearchState.scrollTop || 0);
+  setTimeout(() => {
+    if (out) out.scrollTop = savedScroll;
+  }, 0);
+}
+
 async function openCrossSearchResult(type, idx) {
-  const entry = type === 'diary' ? lastCrossSearchResults.diary[idx] : lastCrossSearchResults.watch[idx];
+  const entry = type === 'diary' ? crossSearchState.diary[idx] : crossSearchState.watch[idx];
   if (!entry) return;
 
   // 3-36 未保存保護：別カードをインライン編集中の場合は保存確認してから移動
@@ -1131,6 +1246,15 @@ async function openCrossSearchResult(type, idx) {
     inlineDiaryLocations = [];
     inlineDiaryOrigCoords = new Map();
   }
+
+  // スクロール位置と閲覧済み状態を保存し、戻る導線を有効化
+  const outEl = document.getElementById('cross-search-results');
+  crossSearchState.scrollTop = outEl ? outEl.scrollTop : 0;
+  const vKey = `${type}:${idx}`;
+  crossSearchState.visitedKeys.add(vKey);
+  crossSearchState.lastVisitedKey = vKey;
+  crossSearchState.active = true;
+  updateCrossSearchReturnBar();
 
   closeModals();
   const targetRow = Number(entry.row || 0);
