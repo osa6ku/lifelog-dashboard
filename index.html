@@ -9,7 +9,7 @@
   <link rel="manifest" href="./manifest.json">
   <link rel="apple-touch-icon" href="./apple-touch-icon.png">
   <link rel="icon" type="image/png" href="./icon-192.png">
-  <title>ライフログ・ダッシュボード v1.17.0</title>
+  <title>ライフログ・ダッシュボード v1.18.0</title>
   <style>
     :root {
       --bg: #f4f6f9;
@@ -283,6 +283,24 @@
       resize: vertical; background: #fff; color: var(--text); box-sizing: border-box;
     }
     .inline-edit-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; align-items: center; }
+    .tag-suggest-box {
+      display: none; flex-wrap: wrap; gap: 6px; margin-top: 6px;
+      padding: 8px; background: #f9fafb; border: 1px solid var(--border);
+      border-radius: 8px; max-height: 150px; overflow-y: auto;
+    }
+    .tag-suggest-box.open { display: flex; }
+    .tag-suggest-item {
+      border: 1px solid #bfdbfe; background: #eff6ff; color: #1d4ed8;
+      border-radius: 999px; padding: 4px 10px; font-size: 12px; font-weight: 600;
+      cursor: pointer; line-height: 1.3;
+    }
+    .tag-suggest-item:hover { background: #dbeafe; }
+    .inline-tag-field { margin-top: 8px; }
+    .inline-tag-field label { display: block; font-size: 11px; font-weight: 700; color: var(--muted); margin-bottom: 3px; }
+    .inline-tag-input {
+      width: 100%; padding: 7px 10px; border: 1px solid var(--border);
+      border-radius: 8px; font-size: 13px; font-family: inherit; box-sizing: border-box;
+    }
   </style>
 </head>
 <body>
@@ -290,7 +308,7 @@
   <div class="header-top">
     <h1 class="app-title">📚 ライフログ・ダッシュボード</h1>
     <div class="header-right">
-      <button type="button" class="ver-badge" id="app-version" onclick="openReleaseNotesModal()" title="変更履歴（リリースノート）を表示">📋 v1.17.0</button>
+      <button type="button" class="ver-badge" id="app-version" onclick="openReleaseNotesModal()" title="変更履歴（リリースノート）を表示">📋 v1.18.0</button>
       <button class="btn-sm" id="btn-check-update" onclick="manualCheckUpdate()" title="最新バージョン確認・更新">🔄 更新</button>
     </div>
   </div>
@@ -393,8 +411,16 @@
     <details id="watch-extra-details">
       <summary>詳細項目（公開年・キャスト・スタッフ・概要・URL）</summary>
       <div class="field"><label>公開年・放送年</label><input id="w-year" placeholder="例: 2026"></div>
-      <div class="field"><label>出演者（キャスト）</label><textarea id="w-cast" rows="2"></textarea></div>
-      <div class="field"><label>監督・脚本・スタッフ</label><input id="w-staff"></div>
+      <div class="field">
+        <label>出演者（キャスト・カンマ区切り）</label>
+        <textarea id="w-cast" rows="2" placeholder="名前を入力すると既存候補を表示..." onfocus="showWatchTagSuggestions('cast', 'w-cast', 'w-cast-suggest')" oninput="showWatchTagSuggestions('cast', 'w-cast', 'w-cast-suggest')" onblur="hideWatchTagSuggestions('w-cast-suggest')"></textarea>
+        <div id="w-cast-suggest" class="tag-suggest-box"></div>
+      </div>
+      <div class="field">
+        <label>監督・脚本・スタッフ（カンマ区切り）</label>
+        <input id="w-staff" placeholder="名前を入力すると既存候補を表示..." onfocus="showWatchTagSuggestions('staff', 'w-staff', 'w-staff-suggest')" oninput="showWatchTagSuggestions('staff', 'w-staff', 'w-staff-suggest')" onblur="hideWatchTagSuggestions('w-staff-suggest')">
+        <div id="w-staff-suggest" class="tag-suggest-box"></div>
+      </div>
       <div class="field"><label>作品概要</label><textarea id="w-summary" rows="3"></textarea></div>
       <div class="field"><label>関連URL</label><input id="w-url" type="url" placeholder="https://..."></div>
     </details>
@@ -531,8 +557,9 @@
 </div>
 
 <script>
-const APP_VERSION = 'v1.17.0';
+const APP_VERSION = 'v1.18.0';
 const DEFAULT_RELEASE_NOTES = [
+  { version: 'v1.18.0', date: '2026-11-19', title: '出演者・監督スタッフのタグ候補＆使用件数表示', items: ['鑑賞記録の編集モーダルおよびカード内インライン編集で「出演者」「監督・スタッフ」入力時に既存表記のタグ候補＋DB実数（例：中谷美紀（12））を提示', '候補選択で既存表記をそのまま挿入し表記揺れを防止（候補にない新規名の自由入力もそのまま保存可能）'] },
   { version: 'v1.17.0', date: '2026-11-19', title: '当日日付初期セット＆場所選択UI改善', items: ['日記・鑑賞記録・食事の新規作成時にローカルタイムゾーン基準の当日日付（YYYY-MM-DD）を自動セット（UTCズレ解消）', '場所入力欄の検索前候補として「自宅」「会社」（座標引き継ぎ対応）＋過去の場所履歴を即時リスト表示', '空欄検索・現在地取得（📍）でGPS近傍スポットをリスト表示・ワンタップ追加できるよう改善'] },
   { version: 'v1.16.0', date: '2026-11-18', title: '変更履歴モーダル＆バージョンボタン化', items: ['ヘッダーのバージョンバッジをタップ可能なボタン（📋 v1.16.0）へ変更', 'v1.0.0〜最新までの変更履歴（リリースノート）を縦スクロール閲覧できるモーダルポップアップを追加'] },
   { version: 'v1.15.0', date: '2026-11-18', title: '関連URLカード表示＆インライン直接編集UI', items: ['鑑賞記録カード上に「関連URL」クリック可能バッジ（改行・カンマ複数URL対応）を常時表示', '日記本文・鑑賞記録感想メモをカード上でそのまま書き足しできるインライン直接編集UIを実装', '詳細編集モーダルの本文・感想メモ入力欄を大幅に拡大（220px+）'] },
@@ -792,6 +819,16 @@ function renderWatch() {
     const memoHtml = isEditing
       ? `<div class="inline-edit-wrap">
           <textarea id="inline-ta-watch-${item.row}" class="inline-edit-ta" oninput="autoResizeTextarea(this, 180)" placeholder="感想・メモを書き足す...">${esc(item.memo || '')}</textarea>
+          <div class="inline-tag-field">
+            <label>👥 出演者（カンマ区切り・既存候補から選択可）</label>
+            <input id="inline-cast-watch-${item.row}" class="inline-tag-input" value="${esc(item.cast || '')}" placeholder="出演者名を入力..." onfocus="showWatchTagSuggestions('cast', 'inline-cast-watch-${item.row}', 'inline-cast-suggest-${item.row}')" oninput="showWatchTagSuggestions('cast', 'inline-cast-watch-${item.row}', 'inline-cast-suggest-${item.row}')" onblur="hideWatchTagSuggestions('inline-cast-suggest-${item.row}')">
+            <div id="inline-cast-suggest-${item.row}" class="tag-suggest-box"></div>
+          </div>
+          <div class="inline-tag-field">
+            <label>🎬 監督・スタッフ（カンマ区切り・既存候補から選択可）</label>
+            <input id="inline-staff-watch-${item.row}" class="inline-tag-input" value="${esc(item.staff || '')}" placeholder="監督・スタッフ名を入力..." onfocus="showWatchTagSuggestions('staff', 'inline-staff-watch-${item.row}', 'inline-staff-suggest-${item.row}')" oninput="showWatchTagSuggestions('staff', 'inline-staff-watch-${item.row}', 'inline-staff-suggest-${item.row}')" onblur="hideWatchTagSuggestions('inline-staff-suggest-${item.row}')">
+            <div id="inline-staff-suggest-${item.row}" class="tag-suggest-box"></div>
+          </div>
           <div class="inline-edit-actions">
             <button class="btn-sm primary" onclick="saveInlineWatch(${item.row})">💾 保存</button>
             <button class="btn-sm" onclick="cancelInlineEdit()">キャンセル</button>
@@ -881,23 +918,130 @@ function openDetailFromInline(type, row, id) {
   else openEditWatchModal(row, id);
 }
 
+function buildWatchTagCounts(field) {
+  const counts = new Map();
+  watchData.forEach(item => {
+    const raw = String((item && item[field]) || '');
+    if (!raw) return;
+    const uniqueInRecord = new Set(
+      raw.split(/[,、]/).map(s => s.trim()).filter(Boolean)
+    );
+    uniqueInRecord.forEach(name => {
+      counts.set(name, (counts.get(name) || 0) + 1);
+    });
+  });
+  return Array.from(counts.entries())
+    .map(([name, count]) => ({ name, count }))
+    .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name, 'ja'));
+}
+
+function getCurrentTagSegment(el) {
+  const val = String(el.value || '');
+  const pos = typeof el.selectionStart === 'number' ? el.selectionStart : val.length;
+  let segStart = 0;
+  for (let i = pos - 1; i >= 0; i--) {
+    if (val[i] === ',' || val[i] === '、') { segStart = i + 1; break; }
+  }
+  let segEnd = val.length;
+  for (let i = pos; i < val.length; i++) {
+    if (val[i] === ',' || val[i] === '、') { segEnd = i; break; }
+  }
+  const query = val.slice(segStart, segEnd).trim();
+  const existingSet = new Set(
+    (val.slice(0, segStart) + ',' + val.slice(segEnd))
+      .split(/[,、]/)
+      .map(s => s.trim())
+      .filter(Boolean)
+  );
+  return { val, segStart, segEnd, query, existingSet };
+}
+
+function showWatchTagSuggestions(field, inputId, boxId) {
+  const el = document.getElementById(inputId);
+  const box = document.getElementById(boxId);
+  if (!el || !box) return;
+  const { query, existingSet } = getCurrentTagSegment(el);
+  if (!query) {
+    box.classList.remove('open');
+    box.innerHTML = '';
+    return;
+  }
+  const qNorm = query.replace(/[\s　]+/g, '').toLowerCase();
+  const allTags = buildWatchTagCounts(field);
+  const matches = allTags.filter(t => {
+    if (existingSet.has(t.name)) return false;
+    const tNorm = t.name.replace(/[\s　]+/g, '').toLowerCase();
+    return tNorm.includes(qNorm) || t.name.toLowerCase().includes(query.toLowerCase());
+  }).slice(0, 20);
+
+  if (matches.length === 0) {
+    box.classList.remove('open');
+    box.innerHTML = '';
+    return;
+  }
+  box.innerHTML = matches.map(t => {
+    const safeName = esc(t.name).replace(/'/g, '&#39;');
+    return `<button type="button" class="tag-suggest-item" data-tag-name="${esc(t.name)}" onmousedown="event.preventDefault(); pickWatchTagSuggestion('${inputId}', '${boxId}', this.dataset.tagName)">${esc(t.name)}（${t.count}）</button>`;
+  }).join('');
+  box.classList.add('open');
+}
+
+function hideWatchTagSuggestions(boxId) {
+  setTimeout(() => {
+    const box = document.getElementById(boxId);
+    if (box) { box.classList.remove('open'); }
+  }, 150);
+}
+
+function pickWatchTagSuggestion(inputId, boxId, tagName) {
+  const el = document.getElementById(inputId);
+  const box = document.getElementById(boxId);
+  if (!el) return;
+  const { val, segStart, segEnd } = getCurrentTagSegment(el);
+  const beforeRaw = val.slice(0, segStart).replace(/[,、\s]+$/, '');
+  const afterRaw = val.slice(segEnd).replace(/^[,、\s]+/, '');
+  const parts = [];
+  if (beforeRaw) parts.push(beforeRaw);
+  parts.push(tagName);
+  if (afterRaw) parts.push(afterRaw);
+  const nextVal = parts.join(', ') + (afterRaw ? '' : ', ');
+  el.value = nextVal;
+  el.focus();
+  const pos = afterRaw ? (beforeRaw ? beforeRaw.length + 2 + tagName.length : tagName.length) : nextVal.length;
+  el.setSelectionRange(pos, pos);
+  if (box) { box.classList.remove('open'); box.innerHTML = ''; }
+}
+
 async function saveInlineWatch(row) {
   const ta = document.getElementById(`inline-ta-watch-${Number(row)}`);
   if (!ta) return;
   const newMemo = ta.value;
+  const castEl = document.getElementById(`inline-cast-watch-${Number(row)}`);
+  const staffEl = document.getElementById(`inline-staff-watch-${Number(row)}`);
+  const cleanTags = (s) => String(s || '').split(/[,、]/).map(x => x.trim()).filter(Boolean).join(', ');
+  const newCast = castEl ? cleanTags(castEl.value) : null;
+  const newStaff = staffEl ? cleanTags(staffEl.value) : null;
+
   const idx = watchData.findIndex(x => Number(x.row) === Number(row));
   if (idx < 0) return;
   const prevItem = { ...watchData[idx] };
-  watchData[idx] = { ...prevItem, memo: newMemo };
+  const payload = { row: prevItem.row, id: prevItem.id, memo: newMemo };
+  const nextLocal = { ...prevItem, memo: newMemo };
+  if (newCast !== null && newCast !== String(prevItem.cast || '').trim()) {
+    payload.cast = newCast;
+    nextLocal.cast = newCast;
+  }
+  if (newStaff !== null && newStaff !== String(prevItem.staff || '').trim()) {
+    payload.staff = newStaff;
+    nextLocal.staff = newStaff;
+  }
+
+  watchData[idx] = nextLocal;
   activeInlineEdit = null;
   renderWatch();
   showToast('保存しました');
   try {
-    const updated = await apiPost('updateWatch', {
-      row: prevItem.row,
-      id: prevItem.id,
-      memo: newMemo
-    });
+    const updated = await apiPost('updateWatch', payload);
     if (!updated || updated.ok === false || !updated.title) {
       watchData[idx] = prevItem;
       renderWatch();
@@ -910,6 +1054,8 @@ async function saveInlineWatch(row) {
       status: updated.status || prevItem.status,
       title: updated.title || prevItem.title,
       memo: updated.memo !== undefined ? updated.memo : newMemo,
+      cast: updated.cast !== undefined ? updated.cast : nextLocal.cast,
+      staff: updated.staff !== undefined ? updated.staff : nextLocal.staff,
       relatedUrl: updated.relatedUrl !== undefined ? updated.relatedUrl : prevItem.relatedUrl,
       notionUrl: updated.notionUrl !== undefined ? updated.notionUrl : prevItem.notionUrl,
     };
@@ -2090,8 +2236,8 @@ async function submitWatch() {
     watchDate: document.getElementById('w-date').value,
     memo: document.getElementById('w-memo').value,
     releaseYear: document.getElementById('w-year').value,
-    cast: document.getElementById('w-cast').value,
-    staff: document.getElementById('w-staff').value,
+    cast: document.getElementById('w-cast').value.split(/[,、]/).map(s => s.trim()).filter(Boolean).join(', '),
+    staff: document.getElementById('w-staff').value.split(/[,、]/).map(s => s.trim()).filter(Boolean).join(', '),
     summary: document.getElementById('w-summary').value,
     relatedUrl: document.getElementById('w-url').value,
   };

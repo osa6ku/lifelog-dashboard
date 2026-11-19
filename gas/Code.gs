@@ -470,6 +470,12 @@ function updateWatchCard(payload) {
   if (payload.memo !== undefined) {
     sheet.getRange(row, COL.MEMO).setValue(String(payload.memo).trim());
   }
+  if (payload.cast !== undefined) {
+    sheet.getRange(row, COL.CAST).setValue(String(payload.cast).trim());
+  }
+  if (payload.staff !== undefined) {
+    sheet.getRange(row, COL.STAFF).setValue(String(payload.staff).trim());
+  }
   if (payload.runWiki) {
     enrichRow_(sheet, row);
   }
