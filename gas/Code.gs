@@ -243,8 +243,24 @@ function fetchWikiPageRaw_(apiBase, headers, title) {
   };
 }
 
-function isValidWorkArticle_(page, category) {
+function isTitleRelevant_(page, cleanTitle) {
+  const norm = (s) => String(s || '')
+    .replace(/\s*\([^)]*\)\s*$/g, '')
+    .replace(/[\s　・:：\-‐–—/!！?？「」『』'".,、。]/g, '')
+    .toLowerCase();
+  const nPage = norm(page.title);
+  const nClean = norm(cleanTitle);
+  if (!nPage || !nClean) return false;
+  if (nPage === nClean || nPage.includes(nClean) || (nPage.length >= 2 && nClean.includes(nPage))) return true;
+  // 原題・別表記がリード文冒頭に含まれる場合（例: EX_MACHINA -> エクス・マキナ）
+  const introNorm = String(page.extract || '').slice(0, 220).replace(/[\s　・:：\-‐–—/!！?？「」『』'".,、。]/g, '').toLowerCase();
+  if (nClean.length >= 2 && introNorm.includes(nClean)) return true;
+  return false;
+}
+
+function isValidWorkArticle_(page, cleanTitle, category) {
   if (!page || page.isDisambig) return false;
+  if (!isTitleRelevant_(page, cleanTitle)) return false;
   const catsStr = (page.categories || []).join(' ');
   const intro = String(page.extract || '').slice(0, 350);
   const wt = String(page.wikitext || '');
@@ -317,8 +333,8 @@ function fetchWikipediaInfo_(title, category) {
     if (!p) continue;
     if (seenResolved.has(p.title)) continue;
     seenResolved.add(p.title);
-    // 作品記事の健全性チェック（一般用語へのリダイレクト等もここで除外）
-    if (!isValidWorkArticle_(p, cat)) continue;
+    // 作品記事の健全性チェック（タイトル関連性＋一般用語へのリダイレクト除外）
+    if (!isValidWorkArticle_(p, cleanTitle, cat)) continue;
     page = p;
     break;
   }
