@@ -2,14 +2,14 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
   <meta name="theme-color" content="#1a73e8">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <link rel="manifest" href="./manifest.json">
   <link rel="apple-touch-icon" href="./apple-touch-icon.png">
   <link rel="icon" type="image/png" href="./icon-192.png">
-  <title>ライフログ・ダッシュボード v1.20.0</title>
+  <title>ライフログ・ダッシュボード v1.21.0</title>
   <style>
     :root {
       --bg: #f4f6f9;
@@ -30,7 +30,7 @@
     header {
       position: sticky; top: 0; z-index: 20;
       background: #ffffff; border-bottom: 1px solid var(--border);
-      padding: 10px 14px;
+      padding: calc(10px + env(safe-area-inset-top, 0px)) calc(14px + env(safe-area-inset-right, 0px)) 10px calc(14px + env(safe-area-inset-left, 0px));
     }
     .header-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: nowrap; }
     .header-right { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
@@ -51,8 +51,10 @@
     .changelog-title { font-size: 14px; font-weight: 700; color: var(--text); }
     .changelog-ul { margin: 4px 0 0 18px; padding: 0; font-size: 13px; line-height: 1.6; color: #374151; }
     .update-banner {
-      display: none; background: #fef3c7; color: #92400e; border-bottom: 1px solid #fde68a;
-      padding: 10px 14px; font-size: 13px; font-weight: 700; text-align: center; cursor: pointer;
+      display: none; position: relative; z-index: 19;
+      background: #fef3c7; color: #92400e; border-bottom: 1px solid #fde68a;
+      padding: 10px calc(14px + env(safe-area-inset-right, 0px)) 10px calc(14px + env(safe-area-inset-left, 0px));
+      font-size: 13px; font-weight: 700; text-align: center; cursor: pointer;
     }
     .update-banner.show { display: block; }
     .app-title {
@@ -60,7 +62,10 @@
       white-space: nowrap; min-width: 0;
     }
     @media (max-width: 420px) {
-      header { padding: 10px 12px; }
+      header {
+        padding-left: calc(12px + env(safe-area-inset-left, 0px));
+        padding-right: calc(12px + env(safe-area-inset-right, 0px));
+      }
       .header-top { gap: 6px; }
       .header-right { gap: 5px; }
       .ver-badge { padding: 3px 7px; }
@@ -320,7 +325,7 @@
   <div class="header-top">
     <h1 class="app-title">📚 ライフログ・ダッシュボード</h1>
     <div class="header-right">
-      <button type="button" class="ver-badge" id="app-version" onclick="openReleaseNotesModal()" title="変更履歴（リリースノート）を表示">📋 v1.20.0</button>
+      <button type="button" class="ver-badge" id="app-version" onclick="openReleaseNotesModal()" title="変更履歴（リリースノート）を表示">📋 v1.21.0</button>
       <button class="btn-sm" id="btn-check-update" onclick="manualCheckUpdate()" title="最新バージョン確認・更新">🔄 更新</button>
     </div>
   </div>
@@ -569,8 +574,9 @@
 </div>
 
 <script>
-const APP_VERSION = 'v1.20.0';
+const APP_VERSION = 'v1.21.0';
 const DEFAULT_RELEASE_NOTES = [
+  { version: 'v1.21.0', date: '2026-11-19', title: 'iPhoneホーム画面PWAのステータスバー重なり解消（safe-area対応）', items: ['viewportメタに viewport-fit=cover を追加し、header上部に env(safe-area-inset-top) を確保してタイトル・更新ボタン・更新バナーがiOSステータスバー領域に重ならないよう修正', 'インセット0のAndroid/Pixel環境では従来どおりのレイアウトを維持'] },
   { version: 'v1.20.0', date: '2026-11-19', title: '旧ブログ2012年日記3件の追加＆iPhoneヘッダー改行崩れ修正', items: ['2012年分の年別アーカイブDocを新設してYEAR_DOC_IDSへ組み込み、旧ブログ「気が向いた時に文章を、」の日記3件（2012-10-25 / 2012-11-01 / 2012-12-15）を原文のまま日記DBへ登録（日付降順ソートも統一）', 'iPhone（幅390px）でタイトル「📚 ライフログ・ダッシュボード」と「🔄 更新」ボタンが折り返す問題を修正（nowrap・flex-shrink:0・レスポンシブフォントサイズ調整）'] },
   { version: 'v1.19.0', date: '2026-11-19', title: '場所クイック候補「自宅」「会社」のGPS座標＆Googleマップ連携', items: ['「自宅」「会社」のGPS座標（緯度・経度）を非公開スプレッドシート（場所プリセット）から安全に読み込み、公開コードへ個人情報を平文記載せずに座標を自動付与', '「自宅」「会社」のワンタップ追加・手入力時に座標（lat, lng）を確実に保存し、日記カード上の個別バッジや「Googleマップで開く／経路を開く」から座標ベースでGoogleマップを開けるよう対応'] },
   { version: 'v1.18.0', date: '2026-11-19', title: '出演者・監督スタッフのタグ候補＆使用件数表示', items: ['鑑賞記録の編集モーダルおよびカード内インライン編集で「出演者」「監督・スタッフ」入力時に既存表記のタグ候補＋DB実数（例：中谷美紀（12））を提示', '候補選択で既存表記をそのまま挿入し表記揺れを防止（候補にない新規名の自由入力もそのまま保存可能）'] },

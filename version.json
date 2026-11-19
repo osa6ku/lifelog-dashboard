@@ -1,7 +1,16 @@
 {
-  "version": "v1.20.0",
-  "updatedAt": "2026-11-19T11:30:00+09:00",
+  "version": "v1.21.0",
+  "updatedAt": "2026-11-19T11:56:00+09:00",
   "history": [
+    {
+      "version": "v1.21.0",
+      "date": "2026-11-19",
+      "title": "iPhoneホーム画面PWAのステータスバー重なり解消（safe-area対応）",
+      "items": [
+        "viewportメタに viewport-fit=cover を追加し、header上部に env(safe-area-inset-top) を確保してタイトル・更新ボタン・更新バナーがiOSステータスバー領域に重ならないよう修正",
+        "インセット0のAndroid/Pixel環境では従来どおりのレイアウトを維持"
+      ]
+    },
     {
       "version": "v1.20.0",
       "date": "2026-11-19",
