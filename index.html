@@ -9,7 +9,7 @@
   <link rel="manifest" href="./manifest.json">
   <link rel="apple-touch-icon" href="./apple-touch-icon.png">
   <link rel="icon" type="image/png" href="./icon-192.png">
-  <title>ライフログ・ダッシュボード v1.22.0</title>
+  <title>ライフログ・ダッシュボード v1.23.0</title>
   <style>
     :root {
       --bg: #f4f6f9;
@@ -329,6 +329,20 @@
       flex: 1; min-width: 0; padding: 7px 10px; border: 1px solid var(--border);
       border-radius: 8px; font-size: 13px; font-family: inherit; box-sizing: border-box;
     }
+    .period-nav {
+      display: flex; align-items: center; gap: 4px; flex-wrap: wrap;
+      margin: 6px 0 8px; font-size: 12px;
+    }
+    .period-nav .btn-sm { padding: 5px 8px; font-size: 12px; }
+    .period-nav input[type="month"] {
+      padding: 4px 6px; border: 1px solid var(--border); border-radius: 8px;
+      font-size: 12px; background: #fff; color: var(--text);
+    }
+    .period-badge {
+      font-size: 11px; font-weight: 700; color: var(--primary);
+      background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 999px;
+      padding: 2px 8px;
+    }
   </style>
 </head>
 <body>
@@ -336,7 +350,7 @@
   <div class="header-top">
     <h1 class="app-title">📚 ライフログ・ダッシュボード</h1>
     <div class="header-right">
-      <button type="button" class="ver-badge" id="app-version" onclick="openReleaseNotesModal()" title="変更履歴（リリースノート）を表示">📋 v1.22.0</button>
+      <button type="button" class="ver-badge" id="app-version" onclick="openReleaseNotesModal()" title="変更履歴（リリースノート）を表示">📋 v1.23.0</button>
       <button class="btn-sm" id="btn-check-update" onclick="manualCheckUpdate()" title="最新バージョン確認・更新">🔄 更新</button>
     </div>
   </div>
@@ -357,11 +371,23 @@
 <main class="container">
   <section id="view-watch" style="display:none;">
     <div class="search-row">
-      <input class="search-input" id="watch-search" type="search" placeholder="タイトル・キャスト・メモを検索..." oninput="renderWatch()">
-      <select class="sort-select" id="watch-sort" onchange="renderWatch()">
-        <option value="date_desc">鑑賞日順</option>
+      <input class="search-input" id="watch-search" type="search" placeholder="タイトル・出演者・スタッフ・メモを全文検索..." onkeydown="if(event.key==='Enter'){event.preventDefault();runWatchServerQuery();}">
+      <button type="button" class="btn-sm primary" onclick="runWatchServerQuery()" title="全期間からサーバー検索">🔍</button>
+      <button type="button" class="btn-sm" onclick="openCrossSearch(document.getElementById('watch-search').value)" title="日記＋鑑賞記録を横断検索">🌐</button>
+      <select class="sort-select" id="watch-sort" onchange="runWatchServerQuery()">
+        <option value="desc">新しい順</option>
+        <option value="asc">古い順</option>
         <option value="rating_desc">評価順</option>
       </select>
+    </div>
+    <div class="period-nav" id="watch-period-nav">
+      <button type="button" class="btn-sm" onclick="stepWatchYear(-1)">◀ 前年</button>
+      <button type="button" class="btn-sm" onclick="stepWatchYear(1)">次年 ▶</button>
+      <button type="button" class="btn-sm" onclick="stepWatchMonth(-1)">◀ 前月</button>
+      <input id="watch-ym" type="month" onchange="onWatchYmChange()" title="年月指定">
+      <button type="button" class="btn-sm" onclick="stepWatchMonth(1)">次月 ▶</button>
+      <span id="watch-period-label" class="period-badge" style="display:none;"></span>
+      <button type="button" class="btn-sm" id="btn-watch-reset" style="display:none;" onclick="resetWatchQuery()">↩ 直近に戻す</button>
     </div>
     <div class="chips" id="status-chips">
       <button class="chip active" data-val="進行中" onclick="setStatusFilter('進行中', this)">▶ 進行中</button>
@@ -382,12 +408,29 @@
     </div>
     <div class="count-bar" id="watch-count">読み込み中...</div>
     <div id="watch-list"><div class="loading">鑑賞記録を読み込んでいます...</div></div>
+    <div id="watch-more-wrap" style="text-align:center;margin:12px 0;display:none;">
+      <button class="btn-sm primary" onclick="showMoreWatch()">もっと読み込む</button>
+    </div>
   </section>
 
   <section id="view-diary">
     <div class="search-row">
-      <input class="search-input" id="diary-search" type="search" placeholder="日記のタイトル・本文・場所を検索..." oninput="renderDiary()">
-      <input class="sort-select" id="diary-ym" type="month" onchange="renderDiary()" title="年月ジャンプ">
+      <input class="search-input" id="diary-search" type="search" placeholder="日記のタイトル・本文・場所を全文検索..." onkeydown="if(event.key==='Enter'){event.preventDefault();runDiaryServerQuery();}">
+      <button type="button" class="btn-sm primary" onclick="runDiaryServerQuery()" title="全期間からサーバー検索">🔍</button>
+      <button type="button" class="btn-sm" onclick="openCrossSearch(document.getElementById('diary-search').value)" title="日記＋鑑賞記録を横断検索">🌐</button>
+      <select class="sort-select" id="diary-sort" onchange="runDiaryServerQuery()">
+        <option value="desc">新しい順</option>
+        <option value="asc">古い順</option>
+      </select>
+    </div>
+    <div class="period-nav" id="diary-period-nav">
+      <button type="button" class="btn-sm" onclick="stepDiaryYear(-1)">◀ 前年</button>
+      <button type="button" class="btn-sm" onclick="stepDiaryYear(1)">次年 ▶</button>
+      <button type="button" class="btn-sm" onclick="stepDiaryMonth(-1)">◀ 前月</button>
+      <input id="diary-ym" type="month" onchange="onDiaryYmChange()" title="年月指定">
+      <button type="button" class="btn-sm" onclick="stepDiaryMonth(1)">次月 ▶</button>
+      <span id="diary-period-label" class="period-badge" style="display:none;"></span>
+      <button type="button" class="btn-sm" id="btn-diary-reset" style="display:none;" onclick="resetDiaryQuery()">↩ 直近に戻す</button>
     </div>
     <div class="count-bar" id="diary-count">読み込み中...</div>
     <div id="diary-list"><div class="loading">日記を読み込んでいます...</div></div>
@@ -579,14 +622,26 @@
   </div>
 </div>
 
+<div class="modal-backdrop" id="modal-cross-search" onclick="if(event.target===this) closeModals()">
+  <div class="modal" style="max-height:88vh;">
+    <div class="modal-title"><span>🌐 横断検索（日記＋鑑賞記録・全期間）</span><button class="btn-sm" onclick="closeModals()">✕</button></div>
+    <div class="search-row" style="margin-bottom:10px;">
+      <input class="search-input" id="cross-search-input" type="search" placeholder="全期間からキーワード検索..." onkeydown="if(event.key==='Enter'){event.preventDefault();execCrossSearch();}">
+      <button type="button" class="btn-sm primary" onclick="execCrossSearch()">🔍 検索</button>
+    </div>
+    <div id="cross-search-results" style="max-height:64vh;overflow-y:auto;"></div>
+  </div>
+</div>
+
 <div id="toast-box" class="toast-box">
   <span id="toast-msg"></span>
   <button id="toast-retry" class="toast-retry" style="display:none;">再試行</button>
 </div>
 
 <script>
-const APP_VERSION = 'v1.22.0';
+const APP_VERSION = 'v1.23.0';
 const DEFAULT_RELEASE_NOTES = [
+  { version: 'v1.23.0', date: '2026-11-19', title: '検索・閲覧のサーバー側化＆初期取得軽量化', items: ['起動時の初期取得を日記＝直近3か月・鑑賞記録＝直近100件（進行中は全件確実に含む）へ軽量化', 'GAS側での全期間全文検索（日記・鑑賞・横断検索）、DB全体での新しい順／古い順切替、年・月ナビ（年またぎ連続移動＋直近復帰）を実装', '場所履歴および出演者・スタッフ既存タグ候補＋DB実数を軽量マスター配信で全件維持'] },
   { version: 'v1.22.0', date: '2026-11-19', title: '日記・鑑賞カード編集UI最適化＆未保存保護', items: ['日記・鑑賞記録のインライン編集中は表示用ボタン行を非表示にし、「保存／キャンセル／詳細」の1行へ一本化', '日記インライン編集にタイトル入力欄および場所スポット（チップ削除・プリセット/履歴追加・重複防止・座標解決維持）を追加', '「⚙️ 日付・写真などの詳細」遷移時・別カード切替時・キャンセル時の未保存変更保護（先保存・失敗時保持）を実装'] },
   { version: 'v1.21.0', date: '2026-11-19', title: 'iPhoneホーム画面PWAのステータスバー重なり解消（safe-area対応）', items: ['viewportメタに viewport-fit=cover を追加し、header上部に env(safe-area-inset-top) を確保してタイトル・更新ボタン・更新バナーがiOSステータスバー領域に重ならないよう修正', 'インセット0のAndroid/Pixel環境では従来どおりのレイアウトを維持'] },
   { version: 'v1.20.0', date: '2026-11-19', title: '旧ブログ2012年日記3件の追加＆iPhoneヘッダー改行崩れ修正', items: ['2012年分の年別アーカイブDocを新設してYEAR_DOC_IDSへ組み込み、旧ブログ「気が向いた時に文章を、」の日記3件（2012-10-25 / 2012-11-01 / 2012-12-15）を原文のまま日記DBへ登録（日付降順ソートも統一）', 'iPhone（幅390px）でタイトル「📚 ライフログ・ダッシュボード」と「🔄 更新」ボタンが折り返す問題を修正（nowrap・flex-shrink:0・レスポンシブフォントサイズ調整）'] },
@@ -776,14 +831,180 @@ async function apiPost(action, payload) {
   return parseGasResponse(res);
 }
 
-async function loadWatchData() {
-  const data = await apiGet({ api: 'watch' });
-  watchData = data.entries || [];
+let diaryTotalCount = 0;
+let diaryFilteredCount = 0;
+let diaryHasMore = false;
+let diaryPeriodFilter = ''; // '' | 'YYYY' | 'YYYY-MM'
+let serverLocationHistory = [];
+
+let watchTotalCount = 0;
+let watchFilteredCount = 0;
+let watchHasMore = false;
+let watchDisplayLimit = 50;
+let watchPeriodFilter = ''; // '' | 'YYYY' | 'YYYY-MM'
+let serverWatchCastTags = [];
+let serverWatchStaffTags = [];
+
+function updatePeriodUi(prefix, periodVal, q, sortVal) {
+  const labelEl = document.getElementById(`${prefix}-period-label`);
+  const resetBtn = document.getElementById(`btn-${prefix}-reset`);
+  const ymInput = document.getElementById(`${prefix}-ym`);
+  if (ymInput) {
+    ymInput.value = /^\d{4}-\d{2}$/.test(periodVal) ? periodVal : '';
+  }
+  if (labelEl) {
+    if (periodVal) {
+      labelEl.textContent = /^\d{4}$/.test(periodVal) ? `${periodVal}年` : periodVal;
+      labelEl.style.display = 'inline-block';
+    } else {
+      labelEl.style.display = 'none';
+    }
+  }
+  const isCustom = Boolean(periodVal || q || (sortVal && sortVal !== 'desc'));
+  if (resetBtn) resetBtn.style.display = isCustom ? 'inline-block' : 'none';
+}
+
+function shiftYearStr(curPeriod, delta) {
+  const today = getLocalTodayIso();
+  const baseYear = /^\d{4}/.test(curPeriod) ? Number(curPeriod.slice(0, 4)) : Number(today.slice(0, 4));
+  return String(baseYear + delta);
+}
+
+function shiftMonthStr(curPeriod, delta) {
+  const today = getLocalTodayIso();
+  let y = Number(today.slice(0, 4));
+  let m = Number(today.slice(5, 7));
+  if (/^\d{4}-\d{2}$/.test(curPeriod)) {
+    y = Number(curPeriod.slice(0, 4));
+    m = Number(curPeriod.slice(5, 7));
+  } else if (/^\d{4}$/.test(curPeriod)) {
+    y = Number(curPeriod);
+    m = delta < 0 ? 12 : 1;
+    return `${y}-${String(m).padStart(2, '0')}`;
+  }
+  const dt = new Date(y, m - 1 + delta, 1);
+  return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}`;
+}
+
+async function loadWatchData(opts = {}) {
+  const q = document.getElementById('watch-search').value.trim();
+  const sort = document.getElementById('watch-sort').value || 'desc';
+  const ym = watchPeriodFilter;
+  const isDefault = !q && !ym && sort === 'desc' && statusFilter === '進行中' && catFilter === 'ALL' && platFilter === 'ALL';
+  const offset = Number(opts.offset || 0);
+  const append = Boolean(opts.append);
+
+  const params = {
+    api: 'watch',
+    sort,
+    limit: '100',
+    offset: String(offset),
+  };
+  if (q) params.q = q;
+  if (ym) params.ym = ym;
+  if (isDefault && offset === 0) {
+    params.includeInProgress = '1';
+  } else {
+    if (statusFilter && statusFilter !== 'ALL') params.status = statusFilter;
+    if (catFilter && catFilter !== 'ALL') params.category = catFilter;
+    if (platFilter && platFilter !== 'ALL') params.platform = platFilter;
+  }
+  if (serverWatchCastTags.length === 0) params.includeMeta = '1';
+
+  updatePeriodUi('watch', ym, q, sort);
+  if (!append) {
+    document.getElementById('watch-list').innerHTML = '<div class="loading">鑑賞記録を読み込んでいます...</div>';
+  }
+  const data = await apiGet(params);
+  if (Array.isArray(data.castTags) && data.castTags.length > 0) serverWatchCastTags = data.castTags;
+  if (Array.isArray(data.staffTags) && data.staffTags.length > 0) serverWatchStaffTags = data.staffTags;
+  watchTotalCount = Number(data.totalCount || (data.entries || []).length);
+  watchFilteredCount = Number(data.filteredCount !== undefined ? data.filteredCount : (data.entries || []).length);
+  watchHasMore = Boolean(data.hasMore);
+
+  if (append) {
+    const existingRows = new Set(watchData.map(x => Number(x.row)));
+    (data.entries || []).forEach(e => {
+      if (!existingRows.has(Number(e.row))) watchData.push(e);
+    });
+  } else {
+    watchDisplayLimit = 50;
+    watchData = data.entries || [];
+  }
   renderWatch();
 }
 
-async function loadDiaryData(forceRenderNut) {
-  const data = await apiGet({ api: 'diary', limit: '0' });
+function runWatchServerQuery() {
+  return loadWatchData({ offset: 0, append: false });
+}
+
+function stepWatchYear(delta) {
+  watchPeriodFilter = shiftYearStr(watchPeriodFilter, delta);
+  runWatchServerQuery();
+}
+
+function stepWatchMonth(delta) {
+  watchPeriodFilter = shiftMonthStr(watchPeriodFilter, delta);
+  runWatchServerQuery();
+}
+
+function onWatchYmChange() {
+  watchPeriodFilter = document.getElementById('watch-ym').value || '';
+  runWatchServerQuery();
+}
+
+function resetWatchQuery() {
+  document.getElementById('watch-search').value = '';
+  document.getElementById('watch-sort').value = 'desc';
+  watchPeriodFilter = '';
+  runWatchServerQuery();
+}
+
+async function showMoreWatch() {
+  if (watchDisplayLimit < watchData.length) {
+    watchDisplayLimit += 50;
+    renderWatch();
+    return;
+  }
+  if (watchHasMore) {
+    await loadWatchData({ offset: watchData.length, append: true });
+    watchDisplayLimit += 50;
+    renderWatch();
+  }
+}
+
+async function loadDiaryData(forceRenderNut, opts = {}) {
+  const q = document.getElementById('diary-search').value.trim();
+  const sort = document.getElementById('diary-sort').value || 'desc';
+  const ym = diaryPeriodFilter;
+  const offset = Number(opts.offset || 0);
+  const append = Boolean(opts.append);
+
+  const params = {
+    api: 'diary',
+    sort,
+    offset: String(offset),
+  };
+  if (q) {
+    params.q = q;
+    params.limit = '80';
+  } else if (ym) {
+    params.ym = ym;
+    params.limit = '0';
+  } else if (sort === 'asc') {
+    params.limit = '80';
+  } else {
+    // 初期表示：直近3か月分のみ取得して軽量化
+    params.months = '3';
+    params.limit = '0';
+  }
+  if (serverLocationHistory.length === 0) params.includeMeta = '1';
+
+  updatePeriodUi('diary', ym, q, sort);
+  if (!append) {
+    document.getElementById('diary-list').innerHTML = '<div class="loading">日記を読み込んでいます...</div>';
+  }
+  const data = await apiGet(params);
   if (Array.isArray(data.locationPresets) && data.locationPresets.length > 0) {
     serverLocationPresets = data.locationPresets;
     saveCachedLocationPresets(serverLocationPresets);
@@ -791,10 +1012,95 @@ async function loadDiaryData(forceRenderNut) {
       showLocationHistory();
     }
   }
-  diaryData = data.entries || [];
+  if (Array.isArray(data.locationHistory) && data.locationHistory.length > 0) {
+    serverLocationHistory = data.locationHistory;
+  }
+  diaryTotalCount = Number(data.totalCount || (data.entries || []).length);
+  diaryFilteredCount = Number(data.filteredCount !== undefined ? data.filteredCount : (data.entries || []).length);
+  diaryHasMore = Boolean(data.hasMore);
+
+  if (append) {
+    const existingRows = new Set(diaryData.map(x => Number(x.row)));
+    (data.entries || []).forEach(e => {
+      if (!existingRows.has(Number(e.row))) diaryData.push(e);
+    });
+  } else {
+    diaryDisplayLimit = 80;
+    diaryData = data.entries || [];
+  }
   renderDiary();
   if (forceRenderNut || document.getElementById('view-nutrition').style.display !== 'none') {
     renderNutritionView();
+  }
+}
+
+function runDiaryServerQuery() {
+  return loadDiaryData(false, { offset: 0, append: false });
+}
+
+function stepDiaryYear(delta) {
+  diaryPeriodFilter = shiftYearStr(diaryPeriodFilter, delta);
+  runDiaryServerQuery();
+}
+
+function stepDiaryMonth(delta) {
+  diaryPeriodFilter = shiftMonthStr(diaryPeriodFilter, delta);
+  runDiaryServerQuery();
+}
+
+function onDiaryYmChange() {
+  diaryPeriodFilter = document.getElementById('diary-ym').value || '';
+  runDiaryServerQuery();
+}
+
+function resetDiaryQuery() {
+  document.getElementById('diary-search').value = '';
+  document.getElementById('diary-sort').value = 'desc';
+  diaryPeriodFilter = '';
+  runDiaryServerQuery();
+}
+
+function openCrossSearch(initialQ) {
+  const input = document.getElementById('cross-search-input');
+  input.value = String(initialQ || '').trim();
+  document.getElementById('cross-search-results').innerHTML = '';
+  document.getElementById('modal-cross-search').classList.add('open');
+  input.focus();
+  if (input.value) execCrossSearch();
+}
+
+async function execCrossSearch() {
+  const q = document.getElementById('cross-search-input').value.trim();
+  const out = document.getElementById('cross-search-results');
+  if (!q) { out.innerHTML = '<div class="loading">検索キーワードを入力してください</div>'; return; }
+  out.innerHTML = '<div class="loading">全期間から横断検索中...</div>';
+  try {
+    const res = await apiGet({ api: 'search', q, scope: 'all', limit: '50' });
+    const dList = res.diaryEntries || [];
+    const wList = res.watchEntries || [];
+    let html = `<div class="count-bar">検索「${esc(q)}」: 日記 ${res.diaryCount || 0}件 / 鑑賞記録 ${res.watchCount || 0}件</div>`;
+    if (dList.length === 0 && wList.length === 0) {
+      html += '<div class="loading">該当する記録がありません</div>';
+    } else {
+      if (dList.length > 0) {
+        html += `<h4 style="margin:10px 0 6px;font-size:13px;color:var(--primary);">📓 日記（${dList.length}件表示）</h4>`;
+        html += dList.map(d => `<div class="card" style="padding:10px;margin-bottom:8px;">
+          <div style="font-size:12px;color:var(--muted);">${esc(d.date)} ${esc(d.title || '')}</div>
+          <div style="font-size:13px;margin-top:4px;white-space:pre-wrap;">${esc(String(d.body || '').slice(0, 140))}</div>
+        </div>`).join('');
+      }
+      if (wList.length > 0) {
+        html += `<h4 style="margin:10px 0 6px;font-size:13px;color:#047857;">🎬 鑑賞記録（${wList.length}件表示）</h4>`;
+        html += wList.map(w => `<div class="card" style="padding:10px;margin-bottom:8px;">
+          <div style="font-size:13px;font-weight:700;">${esc(w.title)} <span class="tag-pill">${esc(w.status || '')}</span></div>
+          <div style="font-size:12px;color:var(--muted);margin-top:2px;">${esc(w.watchDate || '')} ${w.cast ? '👥 ' + esc(w.cast.slice(0, 60)) : ''}</div>
+          ${w.memo ? `<div style="font-size:12px;margin-top:4px;white-space:pre-wrap;">${esc(String(w.memo).slice(0, 120))}</div>` : ''}
+        </div>`).join('');
+      }
+    }
+    out.innerHTML = html;
+  } catch (err) {
+    out.innerHTML = `<div class="loading" style="color:#b91c1c;">検索エラー: ${esc(err.message)}</div>`;
   }
 }
 
@@ -811,21 +1117,21 @@ function setStatusFilter(val, el) {
   statusFilter = val;
   document.querySelectorAll('#status-chips .chip').forEach(c => c.classList.remove('active'));
   el.classList.add('active');
-  renderWatch();
+  runWatchServerQuery();
 }
 
 function setCatFilter(val, el) {
   catFilter = val; platFilter = 'ALL';
   document.querySelectorAll('#cat-chips .chip').forEach(c => c.classList.remove('active-green'));
   el.classList.add('active-green');
-  renderWatch();
+  runWatchServerQuery();
 }
 
 function setPlatFilter(val, el) {
   platFilter = val; catFilter = 'ALL';
   document.querySelectorAll('#cat-chips .chip').forEach(c => c.classList.remove('active-green'));
   el.classList.add('active-green');
-  renderWatch();
+  runWatchServerQuery();
 }
 
 function renderWatch() {
@@ -835,21 +1141,28 @@ function renderWatch() {
     if (statusFilter !== 'ALL' && item.status !== statusFilter) return false;
     if (catFilter !== 'ALL' && item.category !== catFilter) return false;
     if (platFilter !== 'ALL' && !item.platform.includes(platFilter)) return false;
+    if (watchPeriodFilter && !String(item.watchDate || '').startsWith(watchPeriodFilter)) return false;
     if (q) {
-      const hay = `${item.title} ${item.cast} ${item.staff} ${item.platform} ${item.memo}`.toLowerCase();
+      const hay = `${item.title} ${item.cast} ${item.staff} ${item.platform} ${item.memo} ${item.summary}`.toLowerCase();
       if (!hay.includes(q)) return false;
     }
     return true;
   });
-  if (sortMode === 'rating_desc') {
-    list.sort((a, b) => (Number(b.rating) || 0) - (Number(a.rating) || 0) || b.watchDate.localeCompare(a.watchDate));
+  if (sortMode === 'asc') {
+    list.sort((a, b) => (a.watchDate || '9999-99-99').localeCompare(b.watchDate || '9999-99-99') || Number(a.id || 0) - Number(b.id || 0));
+  } else if (sortMode === 'rating_desc') {
+    list.sort((a, b) => (Number(b.rating) || 0) - (Number(a.rating) || 0) || String(b.watchDate || '').localeCompare(String(a.watchDate || '')));
   } else {
-    list.sort((a, b) => b.watchDate.localeCompare(a.watchDate) || b.id - a.id);
+    list.sort((a, b) => String(b.watchDate || '').localeCompare(String(a.watchDate || '')) || Number(b.id || 0) - Number(a.id || 0));
   }
-  document.getElementById('watch-count').textContent = `表示中: ${list.length}件（全${watchData.length}件）`;
+  const sliced = list.slice(0, watchDisplayLimit);
+  const totalLabel = watchTotalCount > 0 ? watchTotalCount : watchData.length;
+  document.getElementById('watch-count').textContent = `表示中: ${sliced.length}件 / 該当${Math.max(list.length, watchFilteredCount && (q || watchPeriodFilter || statusFilter !== '進行中') ? watchFilteredCount : list.length)}件（DB全${totalLabel}件）`;
+  const moreWrap = document.getElementById('watch-more-wrap');
+  if (moreWrap) moreWrap.style.display = (list.length > watchDisplayLimit || watchHasMore) ? 'block' : 'none';
   const container = document.getElementById('watch-list');
-  if (list.length === 0) { container.innerHTML = '<div class="loading">該当する記録がありません</div>'; return; }
-  container.innerHTML = list.slice(0, 80).map(item => {
+  if (sliced.length === 0) { container.innerHTML = '<div class="loading">該当する記録がありません</div>'; return; }
+  container.innerHTML = sliced.map(item => {
     const bClass = item.status === '進行中' ? 'b-inprog' : item.status === '完了' ? 'b-done' : 'b-todo';
     const nextStatus = item.status === '進行中' ? '完了' : '進行中';
     const nextLabel = item.status === '進行中' ? '✅ 完了にする' : '▶ 進行中に戻す';
@@ -1128,6 +1441,10 @@ async function openDetailFromInline(type, row, id) {
 }
 
 function buildWatchTagCounts(field) {
+  const master = field === 'cast' ? serverWatchCastTags : serverWatchStaffTags;
+  if (Array.isArray(master) && master.length > 0) {
+    return master;
+  }
   const counts = new Map();
   watchData.forEach(item => {
     const raw = String((item && item[field]) || '');
@@ -1565,23 +1882,33 @@ function buildDiaryCardHtml(d) {
     </div>`;
 }
 
-function showMoreDiary() {
-  diaryDisplayLimit += 80;
-  renderDiary();
+async function showMoreDiary() {
+  if (diaryDisplayLimit < diaryData.length) {
+    diaryDisplayLimit += 80;
+    renderDiary();
+    return;
+  }
+  if (diaryHasMore) {
+    await loadDiaryData(false, { offset: diaryData.length, append: true });
+    diaryDisplayLimit += 80;
+    renderDiary();
+  }
 }
 
 function renderDiary() {
-  const q = document.getElementById('diary-search').value.trim().toLowerCase();
-  const ym = document.getElementById('diary-ym').value;
-  const list = diaryData.filter(d => {
-    if (ym && !d.date.startsWith(ym)) return false;
-    if (q && !`${d.title} ${d.body} ${d.location} ${d.mealType || ''} ${d.nutritionAdvice || ''}`.toLowerCase().includes(q)) return false;
-    return true;
-  }).sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')) || (Number(b.row || 0) - Number(a.row || 0)));
-  const showAll = Boolean(q || ym);
-  const sliced = showAll ? list : list.slice(0, diaryDisplayLimit);
-  document.getElementById('diary-count').textContent = `表示中: ${sliced.length}件 / 該当${list.length}件（全${diaryData.length}件）`;
-  document.getElementById('diary-more-wrap').style.display = (!showAll && list.length > diaryDisplayLimit) ? 'block' : 'none';
+  const sortMode = document.getElementById('diary-sort')?.value || 'desc';
+  const list = [...diaryData].sort((a, b) => {
+    if (sortMode === 'asc') {
+      return String(a.date || '').localeCompare(String(b.date || '')) || (Number(a.row || 0) - Number(b.row || 0));
+    }
+    return String(b.date || '').localeCompare(String(a.date || '')) || (Number(b.row || 0) - Number(a.row || 0));
+  });
+  const sliced = list.slice(0, diaryDisplayLimit);
+  const totalLabel = diaryTotalCount > 0 ? diaryTotalCount : list.length;
+  const filtLabel = diaryFilteredCount > 0 ? diaryFilteredCount : list.length;
+  const scopeNote = (!diaryPeriodFilter && !document.getElementById('diary-search').value.trim() && sortMode === 'desc') ? '（直近3か月・DB全' + totalLabel + '件）' : `（DB全${totalLabel}件）`;
+  document.getElementById('diary-count').textContent = `表示中: ${sliced.length}件 / 該当${filtLabel}件${scopeNote}`;
+  document.getElementById('diary-more-wrap').style.display = (list.length > diaryDisplayLimit || diaryHasMore) ? 'block' : 'none';
 
   const container = document.getElementById('diary-list');
   if (sliced.length === 0) { container.innerHTML = '<div class="loading">該当する日記がありません</div>'; return; }
@@ -2387,6 +2714,7 @@ function getDiaryLocationHistory(query) {
   diaryData.forEach(d => {
     normalizeDiaryLocations(d).forEach(l => pushLoc(l, `🕒 ${d.date} の履歴`));
   });
+  serverLocationHistory.forEach(l => pushLoc(l, l.date ? `🕒 ${l.date} の履歴` : '🕒 過去の履歴'));
   return Array.from(map.values()).slice(0, q ? 12 : 17);
 }
 

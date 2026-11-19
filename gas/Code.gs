@@ -289,17 +289,16 @@ function fetchWikipediaInfo_(title) {
 // ============================================================================
 
 function doGet(e) {
-  const api = e && e.parameter && e.parameter.api;
+  const params = (e && e.parameter) || {};
+  const api = params.api;
   if (api === 'watch') {
-    const entries = getWatchEntries();
-    return jsonResponse_({ ok: true, count: entries.length, entries });
+    return jsonResponse_(queryWatchEntries_(params));
   }
   if (api === 'diary') {
-    const rawLimit = e.parameter && e.parameter.limit;
-    const limit = rawLimit !== undefined ? Number(rawLimit) : 0;
-    const entries = getDiaryEntries(limit);
-    const locationPresets = getLocationPresets();
-    return jsonResponse_({ ok: true, count: entries.length, entries, locationPresets });
+    return jsonResponse_(queryDiaryEntries_(params));
+  }
+  if (api === 'search') {
+    return jsonResponse_(searchAllEntries_(params));
   }
   if (api === 'presets') {
     const presets = getLocationPresets();
@@ -310,8 +309,8 @@ function doGet(e) {
     return jsonResponse_({ ok: true, count: entries.length, entries });
   }
   if (api === 'thumb') {
-    const fileId = String((e.parameter && e.parameter.id) || '').trim();
-    const full = String((e.parameter && e.parameter.full) || '') === '1';
+    const fileId = String(params.id || '').trim();
+    const full = String(params.full || '') === '1';
     return jsonResponse_(getImageDataUrl_(fileId, full));
   }
   const dashUrl = 'https://osa6ku.github.io/lifelog-dashboard/';
@@ -382,6 +381,197 @@ function getWatchEntries() {
     });
   }
   return entries.reverse();
+}
+
+function queryWatchEntries_(params) {
+  const all = getWatchEntries();
+  const totalCount = all.length;
+  const q = String(params.q || '').trim().toLowerCase();
+  const ym = String(params.ym || '').trim();
+  const status = String(params.status || '').trim();
+  const category = String(params.category || '').trim();
+  const platform = String(params.platform || '').trim();
+  const sort = String(params.sort || 'desc').trim();
+  const limit = Number(params.limit || 0);
+  const offset = Math.max(0, Number(params.offset || 0));
+  const includeInProgress = String(params.includeInProgress || '') === '1';
+  const includeMeta = String(params.includeMeta || '') === '1';
+
+  let castTags, staffTags, platforms;
+  if (includeMeta) {
+    const castMap = {};
+    const staffMap = {};
+    const platSet = {};
+    all.forEach(item => {
+      if (item.cast) {
+        const seen = {};
+        item.cast.split(/[,、]/).forEach(s => {
+          const t = s.trim();
+          if (t && !seen[t]) { seen[t] = true; castMap[t] = (castMap[t] || 0) + 1; }
+        });
+      }
+      if (item.staff) {
+        const seen = {};
+        item.staff.split(/[,、]/).forEach(s => {
+          const t = s.trim();
+          if (t && !seen[t]) { seen[t] = true; staffMap[t] = (staffMap[t] || 0) + 1; }
+        });
+      }
+      if (item.platform) {
+        item.platform.split(',').forEach(s => {
+          const t = s.trim();
+          if (t) platSet[t] = true;
+        });
+      }
+    });
+    castTags = Object.keys(castMap)
+      .map(name => ({ name, count: castMap[name] }))
+      .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
+    staffTags = Object.keys(staffMap)
+      .map(name => ({ name, count: staffMap[name] }))
+      .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
+    platforms = Object.keys(platSet).sort();
+  }
+
+  let filtered = all.filter(item => {
+    if (status && status !== 'ALL' && item.status !== status) return false;
+    if (category && category !== 'ALL' && item.category !== category) return false;
+    if (platform && platform !== 'ALL' && !String(item.platform || '').includes(platform)) return false;
+    if (ym && !String(item.watchDate || '').startsWith(ym)) return false;
+    if (q) {
+      const hay = `${item.title} ${item.cast} ${item.staff} ${item.platform} ${item.memo} ${item.summary}`.toLowerCase();
+      if (!hay.includes(q)) return false;
+    }
+    return true;
+  });
+
+  if (sort === 'asc') {
+    filtered.sort((a, b) => {
+      const da = a.watchDate || '9999-99-99';
+      const db = b.watchDate || '9999-99-99';
+      return da.localeCompare(db) || (Number(a.id || 0) - Number(b.id || 0));
+    });
+  } else if (sort === 'rating_desc') {
+    filtered.sort((a, b) => (Number(b.rating) || 0) - (Number(a.rating) || 0) || String(b.watchDate || '').localeCompare(String(a.watchDate || '')));
+  } else {
+    filtered.sort((a, b) => String(b.watchDate || '').localeCompare(String(a.watchDate || '')) || (Number(b.id || 0) - Number(a.id || 0)));
+  }
+
+  const filteredCount = filtered.length;
+  let entries = limit > 0 ? filtered.slice(offset, offset + limit) : filtered;
+  const hasMore = limit > 0 && (offset + limit < filteredCount);
+
+  if (includeInProgress && offset === 0 && limit > 0) {
+    const rowSet = {};
+    entries.forEach(e => { rowSet[e.row] = true; });
+    all.forEach(item => {
+      if (item.status === '進行中' && !rowSet[item.row]) {
+        entries.push(item);
+        rowSet[item.row] = true;
+      }
+    });
+  }
+
+  const out = { ok: true, count: entries.length, totalCount, filteredCount, hasMore, entries };
+  if (includeMeta) {
+    out.castTags = castTags;
+    out.staffTags = staffTags;
+    out.platforms = platforms;
+  }
+  return out;
+}
+
+function queryDiaryEntries_(params) {
+  const all = getDiaryEntries(0);
+  const totalCount = all.length;
+  const q = String(params.q || '').trim().toLowerCase();
+  const ym = String(params.ym || '').trim();
+  const sort = String(params.sort || 'desc').trim();
+  const months = Number(params.months || 0);
+  const limit = Number(params.limit || 0);
+  const offset = Math.max(0, Number(params.offset || 0));
+  const includeMeta = String(params.includeMeta || '') === '1';
+
+  let locationHistory;
+  if (includeMeta) {
+    const locMap = {};
+    const sortedForHist = [...all].sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')));
+    sortedForHist.forEach(d => {
+      const locs = Array.isArray(d.locations) && d.locations.length > 0
+        ? d.locations
+        : String(d.location || '').split('\n').map(s => s.trim()).filter(Boolean).map(name => ({ name, lat: null, lng: null }));
+      locs.forEach(l => {
+        const name = String((l && l.name) || '').trim();
+        if (!name) return;
+        const lat = (l.lat !== null && l.lat !== undefined && !isNaN(Number(l.lat))) ? Number(l.lat) : null;
+        const lng = (l.lng !== null && l.lng !== undefined && !isNaN(Number(l.lng))) ? Number(l.lng) : null;
+        if (!locMap[name]) {
+          locMap[name] = { name, lat, lng, date: d.date || '' };
+        } else if (lat !== null && lng !== null && locMap[name].lat === null) {
+          locMap[name].lat = lat;
+          locMap[name].lng = lng;
+        }
+      });
+    });
+    locationHistory = Object.values(locMap).slice(0, 200);
+  }
+
+  let cutoffDate = '';
+  if (!q && !ym && sort !== 'asc' && months > 0) {
+    const now = new Date();
+    now.setMonth(now.getMonth() - months);
+    cutoffDate = Utilities.formatDate(now, 'Asia/Tokyo', 'yyyy-MM-dd');
+  }
+
+  let filtered = all.filter(d => {
+    if (ym && !String(d.date || '').startsWith(ym)) return false;
+    if (cutoffDate && String(d.date || '') < cutoffDate) return false;
+    if (q) {
+      const hay = `${d.title || ''} ${d.body || ''} ${d.location || ''} ${d.mealType || ''} ${d.nutritionAdvice || ''}`.toLowerCase();
+      if (!hay.includes(q)) return false;
+    }
+    return true;
+  });
+
+  if (sort === 'asc') {
+    filtered.sort((a, b) => String(a.date || '').localeCompare(String(b.date || '')) || (Number(a.row || 0) - Number(b.row || 0)));
+  } else {
+    filtered.sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')) || (Number(b.row || 0) - Number(a.row || 0)));
+  }
+
+  const filteredCount = filtered.length;
+  const entries = limit > 0 ? filtered.slice(offset, offset + limit) : filtered;
+  const hasMore = limit > 0 && (offset + limit < filteredCount);
+  const locationPresets = getLocationPresets();
+
+  const out = { ok: true, count: entries.length, totalCount, filteredCount, hasMore, locationPresets, entries };
+  if (includeMeta) {
+    out.locationHistory = locationHistory;
+  }
+  return out;
+}
+
+function searchAllEntries_(params) {
+  const q = String(params.q || '').trim();
+  const scope = String(params.scope || 'all').trim();
+  const limit = Number(params.limit || 100);
+  if (!q) {
+    return { ok: true, q: '', diaryCount: 0, watchCount: 0, diaryEntries: [], watchEntries: [] };
+  }
+  const dRes = (scope === 'all' || scope === 'diary')
+    ? queryDiaryEntries_({ q, limit })
+    : { filteredCount: 0, entries: [] };
+  const wRes = (scope === 'all' || scope === 'watch')
+    ? queryWatchEntries_({ q, limit })
+    : { filteredCount: 0, entries: [] };
+  return {
+    ok: true,
+    q,
+    diaryCount: dRes.filteredCount,
+    watchCount: wRes.filteredCount,
+    diaryEntries: dRes.entries,
+    watchEntries: wRes.entries,
+  };
 }
 
 function addWatchEntry(payload) {
