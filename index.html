@@ -9,7 +9,7 @@
   <link rel="manifest" href="./manifest.json">
   <link rel="apple-touch-icon" href="./apple-touch-icon.png">
   <link rel="icon" type="image/png" href="./icon-192.png">
-  <title>ライフログ・ダッシュボード v1.26.0</title>
+  <title>ライフログ・ダッシュボード v1.27.0</title>
   <style>
     :root {
       --bg: #f4f6f9;
@@ -360,6 +360,18 @@
       background: #dbeafe; color: #1d4ed8; white-space: nowrap;
     }
     .cross-visited-badge.done { background: #e5e7eb; color: #4b5563; }
+    .unsent-diary-bar {
+      display: none; position: sticky; top: 0; z-index: 28;
+      background: #fef2f2; border-bottom: 1px solid #fecaca; color: #991b1b;
+      padding: 8px 12px; align-items: center; justify-content: space-between; gap: 6px; flex-wrap: wrap;
+      font-size: 12px; font-weight: 700;
+    }
+    .unsent-diary-bar.show { display: flex; }
+    .inline-loc-status { font-size: 11px; color: var(--muted); margin-top: 4px; min-height: 14px; }
+    .inline-loc-move-btn {
+      border: none; background: transparent; color: #4b5563; cursor: pointer;
+      padding: 0 3px; font-size: 11px; font-weight: 700; line-height: 1;
+    }
   </style>
 </head>
 <body>
@@ -367,7 +379,7 @@
   <div class="header-top">
     <h1 class="app-title">📚 ライフログ・ダッシュボード</h1>
     <div class="header-right">
-      <button type="button" class="ver-badge" id="app-version" onclick="openReleaseNotesModal()" title="変更履歴（リリースノート）を表示">📋 v1.26.0</button>
+      <button type="button" class="ver-badge" id="app-version" onclick="openReleaseNotesModal()" title="変更履歴（リリースノート）を表示">📋 v1.27.0</button>
       <button class="btn-sm" id="btn-check-update" onclick="manualCheckUpdate()" title="最新バージョン確認・更新">🔄 更新</button>
     </div>
   </div>
@@ -387,6 +399,14 @@
 <div id="cross-search-return-bar" class="cross-return-bar">
   <button type="button" class="cross-return-btn" id="cross-search-return-btn" onclick="returnToCrossSearchResults()">← 検索結果に戻る</button>
   <button type="button" class="btn-sm" onclick="dismissCrossSearchReturnBar()" title="戻るバーを閉じる">✕</button>
+</div>
+<div id="unsent-diary-bar" class="unsent-diary-bar">
+  <span id="unsent-diary-msg">⚠️ 保存できなかった日記の下書きがあります</span>
+  <div style="display:flex;gap:6px;align-items:center;">
+    <button type="button" class="btn-sm primary" onclick="retryPendingDiaryDraft()">🔄 再送</button>
+    <button type="button" class="btn-sm" onclick="editPendingDiaryDraft()">✏️ 編集に戻る</button>
+    <button type="button" class="btn-sm" onclick="discardPendingDiaryDraft()">破棄</button>
+  </div>
 </div>
 
 <main class="container">
@@ -660,8 +680,9 @@
 </div>
 
 <script>
-const APP_VERSION = 'v1.26.0';
+const APP_VERSION = 'v1.27.0';
 const DEFAULT_RELEASE_NOTES = [
+  { version: 'v1.27.0', date: '2026-11-20', title: '日記インライン場所ピッカー全機能化＆保存不達・入力消失の緊急修正', items: ['日記カードのインライン編集でGPS現在地近傍スポット取得（📍）・キーワード検索（🔍 Nominatim＋国土地理院フォールバック）・スポット並び替え（◀▶）と削除をカード上で完結', '保存リクエストへタイムアウト（25秒／写真時45秒）・clientRequestId冪等性・未送信下書きのlocalStorage永続保持と再送バー（#unsent-diary-bar）を実装し、無音失敗や入力消失を根絶', 'インライン保存時の未定義関数呼び出し（triggerDiaryDocSyncWithRetry）およびエラートースト背景色バグを修正'] },
   { version: 'v1.26.0', date: '2026-11-19', title: 'Wikipedia補完の区分別曖昧さ回避＆作品記事判定', items: ['Wikipedia補完（GAS側）で区分別の曖昧さ回避記事（例：会社員 (ドラマ)）を優先探索し、一般用語記事（例：サラリーマン）への取り違えを防止', 'リダイレクト解決後のカテゴリ・リード文による作品記事健全性チェックを追加し、作品候補が無い場合は一般用語で埋めず空欄のまま見送り'] },
   { version: 'v1.25.0', date: '2026-11-19', title: '横断検索の結果リストへ戻る導線＆閲覧済マーク', items: ['横断検索ヒットから記事へ遷移後、「← 検索結果に戻る」バーを表示し、再検索通信なしで直前の検索結果・スクロール位置を復元', '「飛ぶ→戻る→別のヒットへ飛ぶ」の繰り返し遷移と、直前閲覧／閲覧済みバッジ表示に対応', 'インライン編集中に「戻る」を押した際の3-36未保存保護ルールに対応'] },
   { version: 'v1.24.0', date: '2026-11-19', title: '横断検索ヒットから記事本体への遷移対応', items: ['横断検索（🌐）のヒットカードをタップするとモーダルを閉じ、該当タブ（日記／鑑賞記録）で対象月の完全なカード（本文全文・写真・編集ボタン）を表示してスクロール＆ハイライト', '鑑賞記録の「完了」作品や古い作品へ遷移時はステータスフィルタを自動解除し段階描画も自動展開', '遷移時に別カードをインライン編集中の場合は3-36の未保存保護ルールを適用'] },
@@ -811,6 +832,12 @@ function switchTab(tab) {
 
 let toastTimer = null;
 function showToast(msg, type = 'info', retryFn = null, durationMs = 3500) {
+  if (type === true) {
+    type = 'error';
+    if (durationMs === 3500) durationMs = 0;
+  } else if (type === false || !type) {
+    type = 'info';
+  }
   const box = document.getElementById('toast-box');
   const msgEl = document.getElementById('toast-msg');
   const retryBtn = document.getElementById('toast-retry');
@@ -842,17 +869,167 @@ async function parseGasResponse(res) {
 }
 
 async function apiGet(params) {
-  const res = await fetch(`${GAS_API_URL}?${new URLSearchParams(params)}`);
+  const res = await fetch(`${GAS_API_URL}?${new URLSearchParams(params)}`, { redirect: 'follow' });
   return parseGasResponse(res);
 }
 
-async function apiPost(action, payload) {
-  const res = await fetch(GAS_API_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-    body: JSON.stringify({ action, payload }),
-  });
-  return parseGasResponse(res);
+async function apiPost(action, payload, timeoutMs) {
+  const hasPhotos = Boolean(payload && Array.isArray(payload.photos) && payload.photos.length > 0);
+  const limitMs = typeof timeoutMs === 'number' && timeoutMs > 0 ? timeoutMs : (hasPhotos ? 45000 : 25000);
+  const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+  const timerId = controller ? setTimeout(() => controller.abort(), limitMs) : null;
+  try {
+    const res = await fetch(GAS_API_URL, {
+      method: 'POST',
+      redirect: 'follow',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({ action, payload }),
+      signal: controller ? controller.signal : undefined,
+    });
+    return await parseGasResponse(res);
+  } catch (err) {
+    if (err && err.name === 'AbortError') {
+      throw new Error(`通信がタイムアウトしました（${Math.round(limitMs / 1000)}秒・電波状況を確認して再試行してください）`);
+    }
+    throw err;
+  } finally {
+    if (timerId) clearTimeout(timerId);
+  }
+}
+
+function triggerDiaryDocSyncWithRetry(syncPayload) {
+  if (!syncPayload) return;
+  const runAsyncDocSync = (sp) => {
+    apiPost('syncDiaryDoc', sp, 30000)
+      .then(syncRes => {
+        if (!syncRes || !syncRes.ok) {
+          const errMsg = (syncRes && syncRes.error) || '同期エラー';
+          showToast(`⚠️ 本文のドキュメント同期に失敗しました (${errMsg})`, 'error', () => {
+            showToast('ドキュメントを再同期中...', 'info', null, 0);
+            runAsyncDocSync(sp);
+          }, 0);
+        }
+      })
+      .catch(err => {
+        showToast(`⚠️ 本文のドキュメント同期に失敗しました (${err.message || err})`, 'error', () => {
+          showToast('ドキュメントを再同期中...', 'info', null, 0);
+          runAsyncDocSync(sp);
+        }, 0);
+      });
+  };
+  runAsyncDocSync(syncPayload);
+}
+
+const PENDING_DIARY_KEY = 'lifelog_pending_diary_v1';
+let pendingDiaryDraftInMemory = null;
+
+function generateClientRequestId() {
+  return `req_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function savePendingDiaryDraft(draftObj) {
+  pendingDiaryDraftInMemory = draftObj;
+  try {
+    localStorage.setItem(PENDING_DIARY_KEY, JSON.stringify(draftObj));
+  } catch (_) {
+    // 写真Base64で容量超過した場合は本文・位置情報だけでも確実に退避
+    try {
+      const slim = { ...draftObj, payload: { ...(draftObj.payload || {}), photos: [] }, photosOmitted: true };
+      localStorage.setItem(PENDING_DIARY_KEY, JSON.stringify(slim));
+    } catch (__) {}
+  }
+}
+
+function loadPendingDiaryDraft() {
+  if (pendingDiaryDraftInMemory) return pendingDiaryDraftInMemory;
+  try {
+    const raw = localStorage.getItem(PENDING_DIARY_KEY);
+    if (!raw) return null;
+    pendingDiaryDraftInMemory = JSON.parse(raw);
+    return pendingDiaryDraftInMemory;
+  } catch (_) {
+    return null;
+  }
+}
+
+function clearPendingDiaryDraft() {
+  pendingDiaryDraftInMemory = null;
+  try { localStorage.removeItem(PENDING_DIARY_KEY); } catch (_) {}
+  const bar = document.getElementById('unsent-diary-bar');
+  if (bar) bar.classList.remove('show');
+}
+
+function showUnsentDiaryBar(reasonMsg) {
+  const draft = loadPendingDiaryDraft();
+  const bar = document.getElementById('unsent-diary-bar');
+  const msgEl = document.getElementById('unsent-diary-msg');
+  if (!bar || !msgEl) return;
+  if (!draft) {
+    bar.classList.remove('show');
+    return;
+  }
+  const titleHint = (draft.payload && (draft.payload.title || String(draft.payload.body || '').slice(0, 18))) || '下書き';
+  msgEl.textContent = reasonMsg
+    ? `⚠️ 保存できませんでした（${reasonMsg}）: 「${titleHint}」を保持中`
+    : `⚠️ 未送信の日記下書き「${titleHint}」が端末に保持されています`;
+  bar.classList.add('show');
+}
+
+async function retryPendingDiaryDraft() {
+  const draft = loadPendingDiaryDraft();
+  if (!draft || !draft.action || !draft.payload) { clearPendingDiaryDraft(); return; }
+  showToast('未送信の日記を再送中...', 'info', null, 0);
+  try {
+    const res = await apiPost(draft.action, draft.payload);
+    if (!res || !res.ok) throw new Error((res && res.error) || '保存に失敗しました');
+    clearPendingDiaryDraft();
+    if (res.entry) {
+      const idx = diaryData.findIndex(d => Number(d.row) === Number(res.entry.row) || String(d.id) === String(res.entry.id));
+      if (idx >= 0) diaryData[idx] = res.entry;
+      else diaryData.unshift(res.entry);
+      if (activeInlineEdit && activeInlineEdit.type === 'diary' && Number(activeInlineEdit.row) === Number(res.entry.row)) {
+        activeInlineEdit = null;
+        inlineDiaryLocations = [];
+        inlineDiaryOrigCoords = new Map();
+      }
+      renderDiary();
+    }
+    if (res.needsDocSync && res.docSyncPayload) {
+      triggerDiaryDocSyncWithRetry(res.docSyncPayload);
+    }
+    showToast('再送して保存しました', 'success', null, 2500);
+  } catch (err) {
+    showUnsentDiaryBar(err.message || '通信エラー');
+    showToast(`⚠️ 保存できませんでした: ${err.message || err}`, 'error', () => retryPendingDiaryDraft(), 0);
+  }
+}
+
+function editPendingDiaryDraft() {
+  const draft = loadPendingDiaryDraft();
+  if (!draft || !draft.payload) return;
+  const p = draft.payload;
+  if (draft.action === 'updateDiary' && p.row) {
+    const existing = diaryData.find(d => Number(d.row) === Number(p.row));
+    if (existing) {
+      openEditDiaryModal(p.row, p.id);
+    } else {
+      openDiaryModal();
+    }
+  } else {
+    openDiaryModal();
+  }
+  if (p.date) document.getElementById('d-date').value = p.date;
+  document.getElementById('d-title').value = p.title || '';
+  document.getElementById('d-body').value = p.body || '';
+  diaryLocations = Array.isArray(p.locations) ? p.locations.map(l => ({ ...l })) : [];
+  renderLocationChips();
+  autoResizeTextarea(document.getElementById('d-body'), 220);
+}
+
+function discardPendingDiaryDraft() {
+  if (!confirm('未送信の日記下書きを破棄しますか？')) return;
+  clearPendingDiaryDraft();
+  showToast('未送信の下書きを破棄しました', 'info', null, 2000);
 }
 
 let diaryTotalCount = 0;
@@ -998,6 +1175,7 @@ async function showMoreWatch() {
 }
 
 async function loadDiaryData(forceRenderNut, opts = {}) {
+  showUnsentDiaryBar();
   const q = document.getElementById('diary-search').value.trim();
   const sort = document.getElementById('diary-sort').value || 'desc';
   const ym = diaryPeriodFilter;
@@ -1466,35 +1644,54 @@ function resolveInlineLocationCoords(name, explicitLat, explicitLng) {
   return { lat: null, lng: null };
 }
 
+function buildInlineLocChipsHtml(rowNum) {
+  const r = Number(rowNum);
+  const len = inlineDiaryLocations.length;
+  return inlineDiaryLocations.map((l, idx) => {
+    const coordTag = (l.lat !== null && l.lng !== null) ? ' title="座標あり"' : '';
+    const leftBtn = (len > 1 && idx > 0) ? `<button type="button" class="inline-loc-move-btn" onclick="moveInlineDiaryLocation(${r}, ${idx}, -1)" title="前へ">◀</button>` : '';
+    const rightBtn = (len > 1 && idx < len - 1) ? `<button type="button" class="inline-loc-move-btn" onclick="moveInlineDiaryLocation(${r}, ${idx}, 1)" title="後ろへ">▶</button>` : '';
+    return `<span class="loc-chip"${coordTag}>📍 ${esc(l.name)}${leftBtn}${rightBtn}<button type="button" onclick="removeInlineDiaryLocation(${r}, ${idx})" title="削除">×</button></span>`;
+  }).join('');
+}
+
 function renderInlineDiaryLocChips(rowNum) {
   const box = document.getElementById(`inline-loc-chips-diary-${Number(rowNum)}`);
   if (!box) return;
-  if (inlineDiaryLocations.length === 0) {
-    box.innerHTML = '';
-    return;
-  }
-  box.innerHTML = inlineDiaryLocations.map((l, idx) => {
-    const coordTag = (l.lat !== null && l.lng !== null) ? ' title="座標あり"' : '';
-    return `<span class="loc-chip"${coordTag}>📍 ${esc(l.name)}<button type="button" onclick="removeInlineDiaryLocation(${Number(rowNum)}, ${idx})" title="削除">×</button></span>`;
-  }).join('');
+  box.innerHTML = buildInlineLocChipsHtml(rowNum);
+}
+
+function moveInlineDiaryLocation(rowNum, idx, delta) {
+  const next = idx + delta;
+  if (next < 0 || next >= inlineDiaryLocations.length) return;
+  const tmp = inlineDiaryLocations[idx];
+  inlineDiaryLocations[idx] = inlineDiaryLocations[next];
+  inlineDiaryLocations[next] = tmp;
+  renderInlineDiaryLocChips(rowNum);
 }
 
 function addInlineDiaryLocation(rowNum, rawName, explicitLat, explicitLng) {
   const name = String(rawName || '').trim();
   if (!name) return;
-  const input = document.getElementById(`inline-loc-input-diary-${Number(rowNum)}`);
-  const box = document.getElementById(`inline-loc-suggest-diary-${Number(rowNum)}`);
+  const r = Number(rowNum);
+  const input = document.getElementById(`inline-loc-input-diary-${r}`);
+  const box = document.getElementById(`inline-loc-suggest-diary-${r}`);
+  const statusEl = document.getElementById(`inline-loc-status-diary-${r}`);
   if (inlineDiaryLocations.some(l => l.name === name)) {
-    showToast(`「${name}」は既に追加されています`);
+    if (statusEl) statusEl.textContent = `「${name}」は既に追加されています`;
     if (input) input.value = '';
     if (box) { box.classList.remove('open'); box.innerHTML = ''; }
     return;
   }
   const coords = resolveInlineLocationCoords(name, explicitLat, explicitLng);
   inlineDiaryLocations.push({ name, lat: coords.lat, lng: coords.lng });
-  renderInlineDiaryLocChips(rowNum);
+  renderInlineDiaryLocChips(r);
   if (input) input.value = '';
   if (box) { box.classList.remove('open'); box.innerHTML = ''; }
+  if (statusEl) {
+    const coordNote = (coords.lat !== null && coords.lng !== null) ? ' (座標取得済)' : '';
+    statusEl.textContent = `追加済み: ${name}${coordNote}（計${inlineDiaryLocations.length}件）`;
+  }
 }
 
 function addInlineDiaryLocationFromInput(rowNum) {
@@ -1508,25 +1705,38 @@ function removeInlineDiaryLocation(rowNum, idx) {
   renderInlineDiaryLocChips(rowNum);
 }
 
-function showInlineDiaryLocSuggestions(rowNum) {
-  const input = document.getElementById(`inline-loc-input-diary-${Number(rowNum)}`);
-  const box = document.getElementById(`inline-loc-suggest-diary-${Number(rowNum)}`);
-  if (!input || !box) return;
-  const q = input.value;
+function renderInlineLocationCandidates(rowNum, cands) {
+  const r = Number(rowNum);
+  const box = document.getElementById(`inline-loc-suggest-diary-${r}`);
+  if (!box) return;
   const existingNames = new Set(inlineDiaryLocations.map(l => l.name));
-  const cands = getDiaryLocationHistory(q).filter(c => !existingNames.has(c.name)).slice(0, 15);
-  if (cands.length === 0) {
+  const filtered = (cands || []).filter(c => c && c.name && !existingNames.has(c.name)).slice(0, 15);
+  if (filtered.length === 0) {
     box.classList.remove('open');
     box.innerHTML = '';
     return;
   }
-  box.innerHTML = cands.map(c => {
+  box.innerHTML = filtered.map(c => {
     const latAttr = (c.lat !== null && c.lat !== undefined) ? String(c.lat) : '';
     const lngAttr = (c.lng !== null && c.lng !== undefined) ? String(c.lng) : '';
     const icon = c.name === '自宅' ? '🏠 ' : (c.name === '会社' ? '🏢 ' : '📍 ');
-    return `<button type="button" class="tag-suggest-item" data-loc-name="${esc(c.name)}" data-loc-lat="${esc(latAttr)}" data-loc-lng="${esc(lngAttr)}" onmousedown="event.preventDefault(); addInlineDiaryLocation(${Number(rowNum)}, this.dataset.locName, this.dataset.locLat, this.dataset.locLng)">${icon}${esc(c.name)}</button>`;
+    const distNote = (typeof c.dist === 'number' && c.dist < 9000) ? ` (${Math.round(c.dist)}m)` : '';
+    return `<button type="button" class="tag-suggest-item" data-loc-name="${esc(c.name)}" data-loc-lat="${esc(latAttr)}" data-loc-lng="${esc(lngAttr)}" title="${esc(c.sub || '')}" onmousedown="event.preventDefault(); addInlineDiaryLocation(${r}, this.dataset.locName, this.dataset.locLat, this.dataset.locLng)">${icon}${esc(c.name)}${esc(distNote)}</button>`;
   }).join('');
   box.classList.add('open');
+}
+
+function showInlineDiaryLocSuggestions(rowNum) {
+  const r = Number(rowNum);
+  const input = document.getElementById(`inline-loc-input-diary-${r}`);
+  const statusEl = document.getElementById(`inline-loc-status-diary-${r}`);
+  if (!input) return;
+  const q = input.value;
+  const cands = getDiaryLocationHistory(q);
+  renderInlineLocationCandidates(r, cands);
+  if (statusEl && cands.length > 0 && !q.trim()) {
+    statusEl.textContent = '定番・履歴から選択 / 📍で現在地近傍 / 🔍でキーワード検索';
+  }
 }
 
 function hideInlineDiaryLocSuggestions(rowNum) {
@@ -1534,6 +1744,148 @@ function hideInlineDiaryLocSuggestions(rowNum) {
     const box = document.getElementById(`inline-loc-suggest-diary-${Number(rowNum)}`);
     if (box) box.classList.remove('open');
   }, 150);
+}
+
+async function fetchInlineNearbyLocations(rowNum) {
+  const r = Number(rowNum);
+  const statusEl = document.getElementById(`inline-loc-status-diary-${r}`);
+  if (!('geolocation' in navigator)) {
+    if (statusEl) statusEl.textContent = '⚠️ このブラウザは位置情報取得に対応していません';
+    return;
+  }
+  const btn = document.getElementById(`btn-inline-loc-gps-${r}`);
+  if (btn) btn.disabled = true;
+  if (statusEl) statusEl.textContent = '📡 現在地（GPS）を取得中...';
+  try {
+    const pos = await new Promise((resolve, reject) => {
+      navigator.geolocation.getCurrentPosition(resolve, reject, {
+        enableHighAccuracy: true, timeout: 10000, maximumAge: 60000,
+      });
+    });
+    const { latitude: lat, longitude: lon } = pos.coords;
+    if (statusEl) statusEl.textContent = '🔍 周辺の住所・スポットを検索中...';
+
+    const nomUrl = `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lon}&accept-language=ja&addressdetails=1`;
+    const overpassQuery = `[out:json][timeout:8];(node(around:450,${lat},${lon})[name];way(around:450,${lat},${lon})[name];);out center 25;`;
+    const ovUrl = `https://overpass-api.de/api/interpreter?data=${encodeURIComponent(overpassQuery)}`;
+
+    const [nomRes, ovRes] = await Promise.allSettled([
+      fetch(nomUrl).then(res => res.ok ? res.json() : null),
+      fetch(ovUrl).then(res => res.ok ? res.json() : null),
+    ]);
+
+    const items = [];
+    const seen = new Set();
+    const addCand = (name, sub, dist, cLat, cLng) => {
+      const clean = String(name || '').trim();
+      if (!clean || seen.has(clean)) return;
+      seen.add(clean);
+      items.push({ name: clean, sub: sub || '', dist, lat: cLat, lng: cLng });
+    };
+
+    if (nomRes.status === 'fulfilled' && nomRes.value) {
+      const nom = nomRes.value;
+      const addr = nom.address || {};
+      const shortAddr = [addr.city || addr.ward || addr.town || addr.village || '', addr.suburb || addr.quarter || addr.neighbourhood || ''].filter(Boolean).join('');
+      const fullAddr = formatAddrSummary(addr);
+      if (nom.name) addCand(nom.name, fullAddr || '現在地スポット', undefined, lat, lon);
+      if (shortAddr) addCand(shortAddr, '現在地の市区町村・町名', undefined, lat, lon);
+      if (fullAddr && fullAddr !== shortAddr) addCand(fullAddr, '現在地の住所', undefined, lat, lon);
+    }
+
+    if (ovRes.status === 'fulfilled' && ovRes.value && Array.isArray(ovRes.value.elements)) {
+      const pois = ovRes.value.elements.map(el => {
+        const elLat = el.lat || (el.center && el.center.lat);
+        const elLon = el.lon || (el.center && el.center.lon);
+        const tags = el.tags || {};
+        const cat = tags.railway || tags.amenity || tags.shop || tags.leisure || tags.tourism || '';
+        const dist = (elLat && elLon) ? calcDistanceMeters(lat, lon, elLat, elLon) : 9999;
+        return { name: tags.name, sub: cat ? `周辺スポット (${cat})` : '周辺スポット', dist, lat: elLat || lat, lng: elLon || lon };
+      }).filter(p => p.name).sort((a, b) => a.dist - b.dist);
+      pois.slice(0, 15).forEach(p => addCand(p.name, p.sub, p.dist, p.lat, p.lng));
+    }
+
+    if (items.length === 0) {
+      if (statusEl) statusEl.textContent = '⚠️ 周辺スポットが見つかりませんでした（手入力も可能です）';
+      renderInlineLocationCandidates(r, []);
+    } else {
+      if (statusEl) statusEl.textContent = `近傍候補 ${items.length}件（タップで座標付き追加）`;
+      renderInlineLocationCandidates(r, items);
+    }
+  } catch (err) {
+    if (statusEl) statusEl.textContent = '⚠️ 位置情報の取得に失敗しました（許可設定をご確認ください・入力内容は保持されています）';
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+async function searchInlineLocationByKeyword(rowNum) {
+  const r = Number(rowNum);
+  const input = document.getElementById(`inline-loc-input-diary-${r}`);
+  const statusEl = document.getElementById(`inline-loc-status-diary-${r}`);
+  const q = input ? input.value.trim() : '';
+  if (!q) {
+    await fetchInlineNearbyLocations(r);
+    return;
+  }
+  const btn = document.getElementById(`btn-inline-loc-search-${r}`);
+  if (btn) btn.disabled = true;
+  if (statusEl) statusEl.textContent = `🔍 「${q}」を検索中...`;
+  try {
+    let items = [];
+    let sourceName = 'OpenStreetMap';
+    try {
+      const url = `https://nominatim.openstreetmap.org/search?format=jsonv2&q=${encodeURIComponent(q)}&accept-language=ja&addressdetails=1&limit=8`;
+      const res = await fetch(url);
+      if (res.ok) {
+        const list = await res.json();
+        items = (list || []).map(it => {
+          const primary = it.name || String(it.display_name || '').split(',')[0].trim();
+          const addrSub = formatAddrSummary(it.address) || String(it.display_name || '');
+          const lat = it.lat !== undefined ? Number(it.lat) : null;
+          const lng = it.lon !== undefined ? Number(it.lon) : null;
+          return { name: primary, sub: addrSub, lat, lng };
+        }).filter(it => it.name);
+      }
+    } catch (_) {}
+
+    if (items.length === 0) {
+      sourceName = '国土地理院';
+      const gsiUrl = `https://msearch.gsi.go.jp/address-search/AddressSearch?q=${encodeURIComponent(q)}`;
+      const gRes = await fetch(gsiUrl);
+      if (gRes.ok) {
+        const gList = await gRes.json();
+        items = (gList || []).slice(0, 10).map(it => {
+          const title = String((it.properties && it.properties.title) || '').trim();
+          const coords = (it.geometry && it.geometry.coordinates) || [];
+          const lng = coords.length >= 2 ? Number(coords[0]) : null;
+          const lat = coords.length >= 2 ? Number(coords[1]) : null;
+          return { name: title, sub: '国土地理院 住所・施設検索', lat, lng };
+        }).filter(it => it.name);
+      }
+    }
+
+    const histMatches = getDiaryLocationHistory(q);
+    const seenNames = new Set(histMatches.map(h => h.name));
+    const merged = [...histMatches, ...items.filter(it => !seenNames.has(it.name))];
+    if (merged.length === 0) {
+      if (statusEl) statusEl.textContent = '該当する場所が見つかりませんでした（＋で自由入力追加できます）';
+      renderInlineLocationCandidates(r, []);
+    } else {
+      if (statusEl) statusEl.textContent = `候補 ${merged.length}件（履歴＋${sourceName}・タップで追加）`;
+      renderInlineLocationCandidates(r, merged);
+    }
+  } catch (err) {
+    const histMatches = getDiaryLocationHistory(q);
+    if (histMatches.length > 0) {
+      if (statusEl) statusEl.textContent = `過去履歴から ${histMatches.length}件を表示中`;
+      renderInlineLocationCandidates(r, histMatches);
+    } else {
+      if (statusEl) statusEl.textContent = '⚠️ 場所検索に失敗しました（通信状況をご確認ください・入力内容は保持されています）';
+    }
+  } finally {
+    if (btn) btn.disabled = false;
+  }
 }
 
 function hasUnsavedInlineChanges() {
@@ -1835,6 +2187,11 @@ async function saveInlineDiary(row, opts = {}) {
   const ta = document.getElementById(`inline-ta-diary-${rowNum}`);
   if (!ta) return false;
   const titleEl = document.getElementById(`inline-title-diary-${rowNum}`);
+  // 入力欄に残っている未追加の場所テキストがあれば自動追加
+  const pendingLocInput = document.getElementById(`inline-loc-input-diary-${rowNum}`);
+  if (pendingLocInput && pendingLocInput.value.trim()) {
+    addInlineDiaryLocation(rowNum, pendingLocInput.value.trim(), null, null);
+  }
   const newBody = ta.value;
   const idx = diaryData.findIndex(d => Number(d.row) === rowNum);
   if (idx < 0) return false;
@@ -1853,51 +2210,39 @@ async function saveInlineDiary(row, opts = {}) {
     body: newBody,
     location: newLocStr,
     locations: resolvedLocs,
+    clientRequestId: generateClientRequestId(),
   };
 
-  if (!waitForCommit) {
-    diaryData[idx] = { ...prevEntry, title: newTitle, body: newBody, location: newLocStr, locations: resolvedLocs };
-    activeInlineEdit = null;
-    inlineDiaryLocations = [];
-    inlineDiaryOrigCoords = new Map();
-    renderDiary();
-    showToast('保存しました');
-  } else {
-    showToast('変更を保存しています...');
-  }
+  // 成功確認まで端末内（localStorage）に下書きを永続保持し、失敗しても入力を絶対に失わない
+  savePendingDiaryDraft({ action: 'updateDiary', payload, savedAt: Date.now() });
+  showToast('日記を保存中...', 'info', null, 0);
+
   try {
     const res = await apiPost('updateDiary', payload);
     if (!res || !res.ok) {
-      if (!waitForCommit) {
-        diaryData[idx] = prevEntry;
-        renderDiary();
-      }
-      showToast('保存に失敗しました: ' + ((res && res.error) || '通信エラー'), true);
-      return false;
+      throw new Error((res && res.error) || '通信エラー');
     }
+    clearPendingDiaryDraft();
     saveLocationToHistory(resolvedLocs);
     if (res.entry) {
       diaryData[idx] = res.entry;
     } else {
       diaryData[idx] = { ...prevEntry, title: newTitle, body: newBody, location: newLocStr, locations: resolvedLocs };
     }
-    if (waitForCommit) {
-      activeInlineEdit = null;
-      inlineDiaryLocations = [];
-      inlineDiaryOrigCoords = new Map();
-      showToast('保存しました');
-    }
+    activeInlineEdit = null;
+    inlineDiaryLocations = [];
+    inlineDiaryOrigCoords = new Map();
     renderDiary();
-    if (res.needsDocSync && res.entry) {
-      triggerDiaryDocSyncWithRetry({ row: res.entry.row, id: res.entry.id });
+    showToast('保存しました', 'success', null, 2000);
+    if (res.needsDocSync && res.docSyncPayload) {
+      triggerDiaryDocSyncWithRetry(res.docSyncPayload);
     }
     return true;
   } catch (err) {
-    if (!waitForCommit) {
-      diaryData[idx] = prevEntry;
-      renderDiary();
-    }
-    showToast('保存に失敗しました: ' + err.message, true);
+    const errMsg = (err && err.message) ? err.message : String(err);
+    // 入力内容とインライン編集状態をそのまま保持し、明示的な赤エラー＋再送導線を出す
+    showUnsentDiaryBar(errMsg);
+    showToast(`⚠️ 保存できませんでした: ${errMsg}`, 'error', () => saveInlineDiary(rowNum, opts), 0);
     return false;
   }
 }
@@ -2060,21 +2405,19 @@ function buildDiaryCardHtml(d) {
   const titleHtml = cleanTitle ? `<h3 class="card-title">${esc(cleanTitle)}</h3>` : '';
   const rowNum = Number(d.row || 0);
   const isEditing = activeInlineEdit && activeInlineEdit.type === 'diary' && Number(activeInlineEdit.row) === rowNum;
-  const inlineLocChipsHtml = isEditing
-    ? inlineDiaryLocations.map((l, idx) => {
-        const coordTag = (l.lat !== null && l.lng !== null) ? ' title="座標あり"' : '';
-        return `<span class="loc-chip"${coordTag}>📍 ${esc(l.name)}<button type="button" onclick="removeInlineDiaryLocation(${rowNum}, ${idx})" title="削除">×</button></span>`;
-      }).join('')
-    : '';
+  const inlineLocChipsHtml = isEditing ? buildInlineLocChipsHtml(rowNum) : '';
   const bodyHtml = isEditing
     ? `<div class="inline-edit-wrap">
         <input id="inline-title-diary-${rowNum}" class="inline-title-input" value="${esc(d.title || '')}" placeholder="タイトル（任意）">
         <div class="inline-loc-wrap">
           <div id="inline-loc-chips-diary-${rowNum}" class="loc-chips">${inlineLocChipsHtml}</div>
           <div class="inline-loc-row">
-            <input id="inline-loc-input-diary-${rowNum}" placeholder="📍 場所を追加（自宅・会社・履歴から選択可）" onfocus="showInlineDiaryLocSuggestions(${rowNum})" oninput="showInlineDiaryLocSuggestions(${rowNum})" onblur="hideInlineDiaryLocSuggestions(${rowNum})" onkeydown="if(event.key==='Enter'){event.preventDefault();addInlineDiaryLocationFromInput(${rowNum});}">
-            <button type="button" class="btn-sm" onclick="addInlineDiaryLocationFromInput(${rowNum})" title="場所を追加">＋</button>
+            <input id="inline-loc-input-diary-${rowNum}" placeholder="場所名を入力して ＋ / 📍 / 🔍" onfocus="showInlineDiaryLocSuggestions(${rowNum})" oninput="showInlineDiaryLocSuggestions(${rowNum})" onblur="hideInlineDiaryLocSuggestions(${rowNum})" onkeydown="if(event.key==='Enter'){event.preventDefault();addInlineDiaryLocationFromInput(${rowNum});}">
+            <button type="button" class="btn-sm" onclick="addInlineDiaryLocationFromInput(${rowNum})" title="入力した場所を追加">＋</button>
+            <button type="button" class="btn-sm" id="btn-inline-loc-gps-${rowNum}" onclick="fetchInlineNearbyLocations(${rowNum})" title="現在地から近傍スポットを取得">📍</button>
+            <button type="button" class="btn-sm" id="btn-inline-loc-search-${rowNum}" onclick="searchInlineLocationByKeyword(${rowNum})" title="キーワードで場所を検索">🔍</button>
           </div>
+          <div id="inline-loc-status-diary-${rowNum}" class="inline-loc-status"></div>
           <div id="inline-loc-suggest-diary-${rowNum}" class="tag-suggest-box"></div>
         </div>
         <textarea id="inline-ta-diary-${rowNum}" class="inline-edit-ta" oninput="autoResizeTextarea(this, 180)" placeholder="出来事やメモ...">${esc(d.body || '')}</textarea>
@@ -3328,6 +3671,7 @@ async function submitDiary() {
     fat: document.getElementById('d-f').value,
     carbs: document.getElementById('d-c').value,
     nutritionAdvice: document.getElementById('d-nut-advice').value,
+    clientRequestId: generateClientRequestId(),
   };
   saveLocationToHistory(locsCopy);
   if (isEdit) {
@@ -3335,6 +3679,9 @@ async function submitDiary() {
     payload.id = targetDiary.id;
     payload.removeUrls = Array.from(removedPhotoUrls);
   }
+  const actionName = isEdit ? 'updateDiary' : 'addDiary';
+  // 成功が確認できるまで端末内（localStorage）に下書きを永続保持
+  savePendingDiaryDraft({ action: actionName, payload, savedAt: Date.now() });
 
   // 楽観的更新：即座にモーダルを閉じてタイムラインへ仮反映
   const weekdays = ['日', '月', '火', '水', '木', '金', '土'];
@@ -3376,8 +3723,9 @@ async function submitDiary() {
 
   const sendDiary = async () => {
     try {
-      const res = await apiPost(isEdit ? 'updateDiary' : 'addDiary', payload);
+      const res = await apiPost(actionName, payload);
       if (!res || !res.ok) throw new Error((res && res.error) || '保存に失敗しました');
+      clearPendingDiaryDraft();
       if (res.failedPhotos && res.failedPhotos.length > 0) {
         alert(`日記は保存されましたが、以下の写真アップロードに失敗しました:\n${res.failedPhotos.join(', ')}`);
       }
@@ -3389,37 +3737,21 @@ async function submitDiary() {
         if (document.getElementById('view-nutrition').style.display !== 'none') renderNutritionView();
       }
       if (res.needsDocSync && res.docSyncPayload) {
-        // Googleドキュメント同期はバックグラウンドで非同期実行（失敗時は再試行トースト通知）
-        const runAsyncDocSync = (syncPayload) => {
-          apiPost('syncDiaryDoc', syncPayload)
-            .then(syncRes => {
-              if (!syncRes || !syncRes.ok) {
-                const errMsg = (syncRes && syncRes.error) || '同期エラー';
-                showToast(`⚠️ 本文のドキュメント同期に失敗しました (${errMsg})`, 'error', () => {
-                  showToast('ドキュメントを再同期中...', 'info', null, 0);
-                  runAsyncDocSync(syncPayload);
-                }, 0);
-              }
-            })
-            .catch(err => {
-              showToast(`⚠️ 本文のドキュメント同期に失敗しました (${err.message || err})`, 'error', () => {
-                showToast('ドキュメントを再同期中...', 'info', null, 0);
-                runAsyncDocSync(syncPayload);
-              }, 0);
-            });
-        };
-        runAsyncDocSync(res.docSyncPayload);
+        triggerDiaryDocSyncWithRetry(res.docSyncPayload);
       }
       showToast('保存しました', 'success', null, 2000);
     } catch (err) {
+      const errMsg = (err && err.message) ? err.message : String(err);
       diaryData = snapshot;
       renderDiary();
       if (document.getElementById('view-nutrition').style.display !== 'none') renderNutritionView();
-      showToast(`日記の保存失敗（元に戻しました）: ${err.message || err}`, 'error', () => {
+      showUnsentDiaryBar(errMsg);
+      showToast(`⚠️ 保存できませんでした（入力内容は保持しています）: ${errMsg}`, 'error', () => {
         diaryData = isEdit
           ? snapshot.map(x => ((targetDiary.row && x.row === targetDiary.row) || String(x.id) === String(targetDiary.id)) ? optimisticItem : x)
           : [optimisticItem, ...snapshot];
         renderDiary();
+        showToast('日記を再送中...', 'info', null, 0);
         sendDiary();
       }, 0);
     }

@@ -1082,6 +1082,17 @@ function writeDiaryNutritionCols_(sheet, row, payload) {
 }
 
 function addDiaryEntry(payload) {
+  const clientReqId = String(payload.clientRequestId || '').trim();
+  if (clientReqId) {
+    try {
+      const cached = CacheService.getScriptCache().get('diary_req_' + clientReqId);
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (parsed && parsed.ok) return Object.assign({}, parsed, { deduplicated: true });
+      }
+    } catch (_) {}
+  }
+
   const dateStr = payload.date || Utilities.formatDate(new Date(), 'Asia/Tokyo', 'yyyy-MM-dd');
   const year = dateStr.slice(0, 4);
   const weekday = getWeekdayJa_(dateStr);
@@ -1147,7 +1158,7 @@ function addDiaryEntry(payload) {
   sheet.getRange(insertedRow, 1, 1, cols.totalCols).setValues([rowArr]);
 
   // Doc同期はメイン保存から完全切り離し（フロントから非同期 syncDiaryDoc で実行）
-  return {
+  const result = {
     ok: true,
     id: nextId,
     row: insertedRow,
@@ -1167,6 +1178,12 @@ function addDiaryEntry(payload) {
     failedPhotos,
     entry: formatDiaryRow_(insertedRow, rowArr, cols),
   };
+  if (clientReqId) {
+    try {
+      CacheService.getScriptCache().put('diary_req_' + clientReqId, JSON.stringify(result), 600);
+    } catch (_) {}
+  }
+  return result;
 }
 
 function applyDiaryExtraToArray_(rowArr, cols, payload, normLocs) {
