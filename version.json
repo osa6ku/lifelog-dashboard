@@ -1,7 +1,16 @@
 {
-  "version": "v1.29.0",
-  "updatedAt": "2026-11-21T22:50:00+09:00",
+  "version": "v1.30.0",
+  "updatedAt": "2026-11-22T01:30:00+09:00",
   "history": [
+    {
+      "version": "v1.30.0",
+      "date": "2026-11-22",
+      "title": "年別Googleドキュメント同期の深夜バッチ化",
+      "items": [
+        "保存時のリアルタイム／非同期Doc同期（syncDiaryDoc）を廃止し、日記保存をスプレッドシート1リクエスト完結へ単純化",
+        "変更のあった年（DIRTY_DOC_YEARS）のみをGAS時間主導トリガー（毎日深夜3時）でスプレッドシート正本から年別Docへクリーン再生成する深夜バッチ同期（syncDirtyDiaryDocsNightly）を実装"
+      ]
+    },
     {
       "version": "v1.29.0",
       "date": "2026-11-21",

@@ -62,3 +62,31 @@ test('GAS Diary location parser preserves backward compatibility for plain text 
     [{ name: '東京駅', lat: 35.6812, lng: 139.7671 }]
   );
 });
+
+test('GAS nightly Doc sync tracks dirty years without duplicates and builds sorted year entries', () => {
+  const { ctx } = loadGasContext();
+  assert.deepEqual(JSON.parse(JSON.stringify(ctx.getDirtyDocYears_())), []);
+
+  ctx.markDocYearDirty_('2026');
+  ctx.markDocYearDirty_('2026');
+  ctx.markDocYearDirty_('2025');
+  ctx.markDocYearDirty_('1999'); // not in YEAR_DOC_IDS -> ignored
+  assert.deepEqual(JSON.parse(JSON.stringify(ctx.getDirtyDocYears_())), ['2025', '2026']);
+
+  const compat = ctx.syncDiaryDocAction({ date: '2024-05-01' });
+  assert.equal(compat.ok, true);
+  assert.equal(compat.docSyncMode, 'nightly_batch');
+  assert.deepEqual(JSON.parse(JSON.stringify(ctx.getDirtyDocYears_())), ['2024', '2025', '2026']);
+
+  const rows = [
+    ['ID', '日付', '曜日', '時刻', 'タイトル', '本文', '場所', '枚数', '写真名', '写真URL'],
+    [2, '2026-11-20', '金', '09:00', 'B', 'line1\n\nline2', '自宅\n会社', 1, 'b.jpg', 'https://example.com/b'],
+    [1, '2026-11-18', '水', '08:00', 'A', 'hello', '東京駅', 0, '', ''],
+    [3, '2025-12-31', '水', '23:00', 'Old', 'old', '', 0, '', ''],
+  ];
+  const entries = JSON.parse(JSON.stringify(ctx.buildYearDocEntries_(rows, '2026')));
+  assert.equal(entries.length, 2);
+  assert.equal(entries[0].date, '2026-11-18');
+  assert.equal(entries[1].date, '2026-11-20');
+  assert.equal(entries[1].location, '自宅 → 会社');
+});

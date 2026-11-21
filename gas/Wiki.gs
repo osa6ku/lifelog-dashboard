@@ -5,6 +5,9 @@ function onOpen() {
     .addItem('「自動補完」チェック済みの行を実行', 'enrichCheckedRows')
     .addSeparator()
     .addItem('プラットフォーム表記揺れを正規化（全行）', 'normalizeAllPlatforms')
+    .addSeparator()
+    .addItem('🌙 年別Doc深夜バッチ同期を設定（毎日3時）', 'installNightlyDocSyncTrigger')
+    .addItem('📄 変更のあった年別Docを今すぐ同期', 'syncDirtyDiaryDocsNightly')
     .addToUi();
 }
 

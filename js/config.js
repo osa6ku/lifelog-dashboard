@@ -1,5 +1,6 @@
-const APP_VERSION = 'v1.29.0';
+const APP_VERSION = 'v1.30.0';
 const DEFAULT_RELEASE_NOTES = [
+  { version: 'v1.30.0', date: '2026-11-22', title: '年別Googleドキュメント同期の深夜バッチ化', items: ['保存時のリアルタイム／非同期Doc同期（syncDiaryDoc）を廃止し、日記保存をスプレッドシート1リクエスト完結へ単純化', '変更のあった年（DIRTY_DOC_YEARS）のみをGAS時間主導トリガー（毎日深夜3時）でスプレッドシート正本から年別Docへクリーン再生成する深夜バッチ同期（syncDirtyDiaryDocsNightly）を実装'] },
   { version: 'v1.29.0', date: '2026-11-21', title: '基盤リファクタリング（モジュール分割・ESLint・自動テスト＆検証環境分離）', items: ['単一肥大化していた index.html（3,930行）を css/style.css＋機能別 js/*.js（8ファイル）へ、GAS（2,007行）を機能別6ファイル（Config/Code/Diary/Watch/Wiki/Meals.gs）へ分割', 'モーダルとインラインで重複していた場所検索・現在地取得ロジックを js/location.js の共通コアへ統合', 'ESLint（未定義関数・未使用変数検出）およびモックAPIベースの自動回帰テスト（npm run check）とステージング環境分離機構を導入'] },
   { version: 'v1.28.0', date: '2026-11-21', title: '場所キーワード検索の海外地名混入修正＆重複統合', items: ['Nominatimキーワード検索（インライン／詳細編集の両方）へ countrycodes=jp を付与し、海外地名混入の引き金だった addressdetails=1 を削除', 'name＋座標（小数3桁丸め）一致の重複候補を1件に統合する重複除去（dedupeLocationCandidates）を追加'] },
   { version: 'v1.27.0', date: '2026-11-20', title: '日記インライン場所ピッカー全機能化＆保存不達・入力消失の緊急修正', items: ['日記カードのインライン編集でGPS現在地近傍スポット取得（📍）・キーワード検索（🔍 Nominatim＋国土地理院フォールバック）・スポット並び替え（◀▶）と削除をカード上で完結', '保存リクエストへタイムアウト（25秒／写真時45秒）・clientRequestId冪等性・未送信下書きのlocalStorage永続保持と再送バー（#unsent-diary-bar）を実装し、無音失敗や入力消失を根絶', 'インライン保存時の未定義関数呼び出し（triggerDiaryDocSyncWithRetry）およびエラートースト背景色バグを修正'] },

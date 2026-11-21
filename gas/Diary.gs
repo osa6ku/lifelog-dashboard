@@ -379,24 +379,17 @@ function addDiaryEntry(payload) {
   const insertedRow = lastRow + 1;
   sheet.getRange(insertedRow, 1, 1, cols.totalCols).setValues([rowArr]);
 
-  // Doc同期はメイン保存から完全切り離し（フロントから非同期 syncDiaryDoc で実行）
+  // 年別Doc同期はリアルタイム実行を廃止し、深夜バッチ同期対象として年をマーク
+  if (docId) markDocYearDirty_(year);
   const result = {
     ok: true,
     id: nextId,
     row: insertedRow,
     date: dateStr,
     docSynced: false,
-    needsDocSync: Boolean(docId),
-    docSyncPayload: docId ? {
-      mode: 'add',
-      date: dateStr,
-      weekday,
-      title,
-      location,
-      body,
-      jpgNames,
-      driveUrls,
-    } : null,
+    docSyncMode: 'nightly_batch',
+    needsDocSync: false,
+    docSyncPayload: null,
     failedPhotos,
     entry: formatDiaryRow_(insertedRow, rowArr, cols),
   };
@@ -438,6 +431,7 @@ function updateDiaryEntry(payload) {
   const oldDate = formatDateVal_(rowArr[1]);
   const oldTitle = String(rowArr[4] || '');
   const oldBody = String(rowArr[5] || '').trim();
+  const oldLocation = String(rowArr[6] || '').trim();
 
   const dateStr = payload.date ? String(payload.date).slice(0, 10) : oldDate;
   const weekday = getWeekdayJa_(dateStr);
@@ -483,62 +477,30 @@ function updateDiaryEntry(payload) {
   // シート1行一括書き込み（setValues 1回のみ）
   sheet.getRange(row, 1, 1, cols.totalCols).setValues([rowArr]);
 
-  const needsDocSync = (dateStr !== oldDate) || (title !== oldTitle) || (body !== oldBody);
+  // 年別Doc同期は深夜バッチへ委譲（対象年をマークするのみ）
+  const newYear = String(dateStr || '').slice(0, 4);
+  const oldYear = String(oldDate || '').slice(0, 4);
+  const docContentChanged = (dateStr !== oldDate) || (title !== oldTitle) || (body !== oldBody) || (location !== oldLocation);
+  if (docContentChanged) {
+    if (YEAR_DOC_IDS[newYear]) markDocYearDirty_(newYear);
+    if (oldYear && oldYear !== newYear && YEAR_DOC_IDS[oldYear]) markDocYearDirty_(oldYear);
+  }
   return {
     ok: true,
     docSynced: false,
-    docSyncSkipped: !needsDocSync,
-    needsDocSync,
-    docSyncPayload: needsDocSync ? {
-      mode: 'update',
-      oldDate,
-      oldTitle,
-      date: dateStr,
-      weekday,
-      title,
-      location,
-      body,
-    } : null,
+    docSyncMode: 'nightly_batch',
+    docSyncSkipped: !docContentChanged,
+    needsDocSync: false,
+    docSyncPayload: null,
     entry: formatDiaryRow_(row, rowArr, cols),
   };
 }
 
 function syncDiaryDocAction(payload) {
-  const mode = payload.mode || 'update';
-  if (mode === 'add') {
-    const year = String(payload.date || '').slice(0, 4);
-    const docId = YEAR_DOC_IDS[year];
-    if (!docId) return { ok: true, docSynced: false };
-    try {
-      const doc = DocumentApp.openById(docId);
-      const docBody = doc.getBody();
-      const hText = `${payload.date} (${payload.weekday || ''}) — ${payload.title || '(無題)'}`;
-      docBody.appendParagraph(hText).setHeading(DocumentApp.ParagraphHeading.HEADING2);
-      const locStr = String(payload.location || '').split('\n').map(s => s.trim()).filter(Boolean).join(' → ');
-      if (locStr) docBody.appendParagraph(`📍 場所: ${locStr}`);
-      const bodyText = String(payload.body || '').trim();
-      if (bodyText) {
-        bodyText.split(/\r?\n/).forEach(line => {
-          if (line.trim()) docBody.appendParagraph(line);
-        });
-      }
-      const jpgNames = payload.jpgNames || [];
-      (payload.driveUrls || []).forEach((u, idx) => {
-        docBody.appendParagraph(`📷 写真: ${jpgNames[idx] || 'photo.jpg'}`).setLinkUrl(u);
-      });
-      docBody.appendHorizontalRule();
-      doc.saveAndClose();
-      return { ok: true, docSynced: true };
-    } catch (err) {
-      return { ok: false, docSynced: false, error: String(err) };
-    }
-  }
-  try {
-    const ok = syncDiaryDocUpdate_(payload.oldDate, payload.oldTitle, payload.date, payload.weekday, payload.title, payload.location, payload.body);
-    return { ok: true, docSynced: ok };
-  } catch (err) {
-    return { ok: false, docSynced: false, error: String(err) };
-  }
+  // v1.30.0以降、年別Doc同期は深夜バッチ（syncDirtyDiaryDocsNightly）へ一本化
+  const year = String((payload && payload.date) || '').slice(0, 4);
+  if (year && YEAR_DOC_IDS[year]) markDocYearDirty_(year);
+  return { ok: true, docSynced: false, docSyncMode: 'nightly_batch' };
 }
 
 function deleteDiaryEntry(payload) {
@@ -546,87 +508,153 @@ function deleteDiaryEntry(payload) {
   const sheet = ss.getSheetByName(DIARY_SHEET_NAME);
   const row = resolveRowByIdOrIndex_(sheet, 1, payload.row, payload.id);
   if (row < 2) return { ok: false, error: 'Diary entry not found' };
+  const oldDate = formatDateVal_(sheet.getRange(row, 2).getValue());
+  const oldYear = String(oldDate || '').slice(0, 4);
   sheet.deleteRow(row);
+  if (oldYear && YEAR_DOC_IDS[oldYear]) markDocYearDirty_(oldYear);
   return { ok: true, deletedRow: row };
 }
 
-function syncDiaryDocUpdate_(oldDate, oldTitle, newDate, newWeekday, newTitle, newLocation, newBody) {
-  const year = String(newDate || '').slice(0, 4);
-  const docId = YEAR_DOC_IDS[year];
-  if (!docId || String(oldDate || '').slice(0, 4) !== year) return false;
+const DIRTY_DOC_YEARS_PROP = 'DIRTY_DOC_YEARS';
+
+function getDirtyDocYears_() {
+  try {
+    if (typeof PropertiesService === 'undefined') return [];
+    const raw = PropertiesService.getScriptProperties().getProperty(DIRTY_DOC_YEARS_PROP);
+    if (!raw) return [];
+    const arr = JSON.parse(raw);
+    return Array.isArray(arr) ? arr.map(String).filter(Boolean) : [];
+  } catch (e) {
+    return [];
+  }
+}
+
+function setDirtyDocYears_(years) {
+  try {
+    if (typeof PropertiesService === 'undefined') return;
+    const unique = Array.from(new Set((years || []).map(String).filter(Boolean))).sort();
+    PropertiesService.getScriptProperties().setProperty(DIRTY_DOC_YEARS_PROP, JSON.stringify(unique));
+  } catch (e) { /* ignore */ }
+}
+
+function markDocYearDirty_(year) {
+  const y = String(year || '').trim();
+  if (!y || !YEAR_DOC_IDS[y]) return;
+  const cur = getDirtyDocYears_();
+  if (cur.indexOf(y) === -1) {
+    cur.push(y);
+    setDirtyDocYears_(cur);
+  }
+}
+
+function buildYearDocEntries_(rows, year) {
+  const targetYear = String(year || '').trim();
+  const entries = [];
+  for (let i = 1; i < rows.length; i++) {
+    const r = rows[i];
+    const dateStr = formatDateVal_(r[1]);
+    if (!dateStr || dateStr.slice(0, 4) !== targetYear) continue;
+    const jpgNames = String(r[8] || '').split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+    const driveUrls = String(r[9] || '').split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+    entries.push({
+      id: Number(r[0]) || i,
+      date: dateStr,
+      weekday: String(r[2] || '').trim(),
+      title: String(r[4] || '').trim(),
+      body: String(r[5] || ''),
+      location: String(r[6] || '').split(/\r?\n/).map(s => s.trim()).filter(Boolean).join(' → '),
+      jpgNames,
+      driveUrls,
+    });
+  }
+  entries.sort((a, b) => a.date.localeCompare(b.date) || (a.id - b.id));
+  return entries;
+}
+
+function rebuildYearDiaryDoc_(year) {
+  const docId = YEAR_DOC_IDS[String(year)];
+  if (!docId) return { ok: false, year, count: 0, error: 'YEAR_DOC_ID not configured' };
+
+  const ss = SpreadsheetApp.openById(DIARY_SS_ID);
+  const sheet = ss.getSheetByName(DIARY_SHEET_NAME);
+  const rows = sheet.getDataRange().getValues();
+  const entries = buildYearDocEntries_(rows, year);
 
   const doc = DocumentApp.openById(docId);
   const docBody = doc.getBody();
-  let numChildren = docBody.getNumChildren();
-  const titlePrefix = `${oldDate}`;
-  let headingIdx = -1;
+  docBody.clear();
+  docBody.appendParagraph(`日記アーカイブ ${year}年（全${entries.length}件）`)
+    .setHeading(DocumentApp.ParagraphHeading.HEADING1);
 
-  for (let i = 0; i < numChildren; i++) {
-    const el = docBody.getChild(i);
-    if (el.getType() !== DocumentApp.ElementType.PARAGRAPH) continue;
-    const p = el.asParagraph();
-    if (p.getHeading() !== DocumentApp.ParagraphHeading.HEADING2) continue;
-    const txt = p.getText();
-    if (txt.startsWith(titlePrefix) && (!oldTitle || txt.includes(oldTitle))) {
-      headingIdx = i;
-      break;
+  entries.forEach(ent => {
+    const wd = ent.weekday ? ` (${ent.weekday})` : '';
+    docBody.appendParagraph(`${ent.date}${wd} — ${ent.title || '(無題)'}`)
+      .setHeading(DocumentApp.ParagraphHeading.HEADING2);
+    if (ent.location) {
+      docBody.appendParagraph(`📍 場所: ${ent.location}`);
     }
-  }
-  if (headingIdx < 0) return false;
-
-  const newHeading = `${newDate} (${newWeekday}) — ${newTitle || '(無題)'}`;
-  docBody.getChild(headingIdx).asParagraph().setText(newHeading);
-
-  // 見出しの次〜HorizontalRule（または次のHEADING2）までの古い場所・本文段落を収集（写真リンク段落は保持）
-  const removeIndices = [];
-  let hasTerminator = false;
-  for (let i = headingIdx + 1; i < numChildren; i++) {
-    const el = docBody.getChild(i);
-    const t = el.getType();
-    if (t === DocumentApp.ElementType.HORIZONTAL_RULE) {
-      hasTerminator = true;
-      break;
-    }
-    if (t === DocumentApp.ElementType.PARAGRAPH) {
-      const p = el.asParagraph();
-      if (p.getHeading() === DocumentApp.ParagraphHeading.HEADING2) {
-        hasTerminator = true;
-        break;
-      }
-      if (!p.getText().startsWith('📷')) {
-        removeIndices.push(i);
-      }
-    }
-  }
-
-  // 末尾エントリで終端がない場合、先にHorizontalRuleを追加することで「最終段落は削除できません」を根本回避
-  if (!hasTerminator) {
+    String(ent.body || '').split(/\r?\n/).forEach(line => {
+      if (line.trim().length > 0) docBody.appendParagraph(line);
+    });
+    ent.driveUrls.forEach((u, idx) => {
+      const label = ent.jpgNames[idx] || 'photo.jpg';
+      docBody.appendParagraph(`📷 写真: ${label}`).setLinkUrl(u);
+    });
     docBody.appendHorizontalRule();
-    numChildren = docBody.getNumChildren();
-  }
-
-  // 1. 先に古い段落をすべて削除（多重挿入・重複蓄積を防止）
-  for (let i = removeIndices.length - 1; i >= 0; i--) {
-    const idx = removeIndices[i];
-    if (idx >= docBody.getNumChildren() - 1) continue;
-    docBody.removeChild(docBody.getChild(idx));
-  }
-
-  // 2. その後で新しい場所・本文を非空行のみ安全に挿入（「Cannot insert an empty text element.」を完全回避）
-  let insertAt = headingIdx + 1;
-  const locStr = String(newLocation || '').split('\n').map(s => s.trim()).filter(Boolean).join(' → ');
-  if (locStr) {
-    docBody.insertParagraph(insertAt, `📍 場所: ${locStr}`);
-    insertAt++;
-  }
-  const bodyLines = String(newBody || '').split(/\r?\n/).filter(line => line.trim().length > 0);
-  bodyLines.forEach(line => {
-    docBody.insertParagraph(insertAt, line);
-    insertAt++;
   });
 
   doc.saveAndClose();
-  return true;
+  return { ok: true, year: String(year), count: entries.length };
+}
+
+/**
+ * 深夜バッチ同期（GAS時間主導トリガーで毎日深夜1回実行）
+ * 変更のあった年（DIRTY_DOC_YEARS）のみ、スプレッドシート正本から年別Docをクリーン再生成する。
+ */
+function syncDirtyDiaryDocsNightly() {
+  const dirtyYears = getDirtyDocYears_();
+  if (dirtyYears.length === 0) {
+    Logger.log('syncDirtyDiaryDocsNightly: no dirty years to sync.');
+    return { ok: true, synced: [], remaining: [] };
+  }
+  const synced = [];
+  const remaining = [];
+  dirtyYears.forEach(y => {
+    try {
+      const res = rebuildYearDiaryDoc_(y);
+      if (res.ok) synced.push(res);
+      else remaining.push(y);
+    } catch (err) {
+      Logger.log(`syncDirtyDiaryDocsNightly error (${y}): ${err}`);
+      remaining.push(y);
+    }
+  });
+  setDirtyDocYears_(remaining);
+  try {
+    PropertiesService.getScriptProperties().setProperty(
+      'LAST_DOC_BATCH_SYNC',
+      JSON.stringify({ at: Utilities.formatDate(new Date(), 'Asia/Tokyo', 'yyyy-MM-dd HH:mm:ss'), synced, remaining })
+    );
+  } catch (e) { /* ignore */ }
+  return { ok: remaining.length === 0, synced, remaining };
+}
+
+/**
+ * 毎日深夜3時〜4時に syncDirtyDiaryDocsNightly を実行する時間主導トリガーを登録（重複防止付き）
+ */
+function installNightlyDocSyncTrigger() {
+  const triggers = ScriptApp.getProjectTriggers();
+  triggers.forEach(t => {
+    if (t.getHandlerFunction() === 'syncDirtyDiaryDocsNightly') {
+      ScriptApp.deleteTrigger(t);
+    }
+  });
+  ScriptApp.newTrigger('syncDirtyDiaryDocsNightly')
+    .timeBased()
+    .everyDays(1)
+    .atHour(3)
+    .create();
+  return { ok: true, schedule: 'daily 03:00-04:00' };
 }
 
 

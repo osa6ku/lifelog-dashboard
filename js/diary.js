@@ -244,9 +244,6 @@ async function saveInlineDiary(row, opts = {}) {
     inlineDiaryOrigCoords = new Map();
     renderDiary();
     showToast('保存しました', 'success', null, 2000);
-    if (res.needsDocSync && res.docSyncPayload) {
-      triggerDiaryDocSyncWithRetry(res.docSyncPayload);
-    }
     return true;
   } catch (err) {
     const errMsg = (err && err.message) ? err.message : String(err);
@@ -663,9 +660,6 @@ async function submitDiary() {
         else diaryData.unshift(res.entry);
         renderDiary();
         if (document.getElementById('view-nutrition').style.display !== 'none') renderNutritionView();
-      }
-      if (res.needsDocSync && res.docSyncPayload) {
-        triggerDiaryDocSyncWithRetry(res.docSyncPayload);
       }
       showToast('保存しました', 'success', null, 2000);
     } catch (err) {

@@ -65,29 +65,6 @@ async function apiPost(action, payload, timeoutMs) {
   }
 }
 
-function triggerDiaryDocSyncWithRetry(syncPayload) {
-  if (!syncPayload) return;
-  const runAsyncDocSync = (sp) => {
-    apiPost('syncDiaryDoc', sp, 30000)
-      .then(syncRes => {
-        if (!syncRes || !syncRes.ok) {
-          const errMsg = (syncRes && syncRes.error) || '同期エラー';
-          showToast(`⚠️ 本文のドキュメント同期に失敗しました (${errMsg})`, 'error', () => {
-            showToast('ドキュメントを再同期中...', 'info', null, 0);
-            runAsyncDocSync(sp);
-          }, 0);
-        }
-      })
-      .catch(err => {
-        showToast(`⚠️ 本文のドキュメント同期に失敗しました (${err.message || err})`, 'error', () => {
-          showToast('ドキュメントを再同期中...', 'info', null, 0);
-          runAsyncDocSync(sp);
-        }, 0);
-      });
-  };
-  runAsyncDocSync(syncPayload);
-}
-
 const PENDING_DIARY_KEY = 'lifelog_pending_diary_v1';
 let pendingDiaryDraftInMemory = null;
 
@@ -161,9 +138,6 @@ async function retryPendingDiaryDraft() {
         inlineDiaryOrigCoords = new Map();
       }
       renderDiary();
-    }
-    if (res.needsDocSync && res.docSyncPayload) {
-      triggerDiaryDocSyncWithRetry(res.docSyncPayload);
     }
     showToast('再送して保存しました', 'success', null, 2500);
   } catch (err) {
