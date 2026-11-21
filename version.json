@@ -1,7 +1,17 @@
 {
-  "version": "v1.28.0",
-  "updatedAt": "2026-11-21T09:18:00+09:00",
+  "version": "v1.29.0",
+  "updatedAt": "2026-11-21T22:50:00+09:00",
   "history": [
+    {
+      "version": "v1.29.0",
+      "date": "2026-11-21",
+      "title": "基盤リファクタリング（モジュール分割・ESLint・自動テスト＆検証環境分離）",
+      "items": [
+        "単一肥大化していた index.html（3,930行）を css/style.css＋機能別 js/*.js（8ファイル）へ、GAS（2,007行）を機能別6ファイル（Config/Code/Diary/Watch/Wiki/Meals.gs）へ分割",
+        "モーダルとインラインで重複していた場所検索・現在地取得ロジックを js/location.js の共通コアへ統合",
+        "ESLint（未定義関数・未使用変数検出）およびモックAPIベースの自動回帰テスト（npm run check）とステージング環境分離機構を導入"
+      ]
+    },
     {
       "version": "v1.28.0",
       "date": "2026-11-21",

@@ -1,7 +1,16 @@
-const CACHE_NAME = 'lifelog-dashboard-v1.28.0';
+const CACHE_NAME = 'lifelog-dashboard-v1.29.0';
 const SHELL_ASSETS = [
   './',
   './index.html',
+  './css/style.css',
+  './js/config.js',
+  './js/api.js',
+  './js/location.js',
+  './js/search.js',
+  './js/watch.js',
+  './js/diary.js',
+  './js/meals.js',
+  './js/app.js',
   './manifest.json',
   './icon-192.png',
   './icon-512.png',

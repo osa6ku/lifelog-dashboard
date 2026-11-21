@@ -1,0 +1,16 @@
+{
+  "name": "lifelog-dashboard",
+  "version": "1.29.0",
+  "private": true,
+  "description": "Lifelog Dashboard (GitHub Pages PWA + GAS)",
+  "scripts": {
+    "lint": "eslint js/*.js sw.js gas/*.gs tests/*.mjs",
+    "syntax": "node scripts/check-syntax.mjs",
+    "test": "node --test tests/*.test.mjs",
+    "check": "npm run syntax && npm run lint && npm test"
+  },
+  "devDependencies": {
+    "eslint": "^9.39.5",
+    "globals": "^17.14.0"
+  }
+}
