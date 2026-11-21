@@ -1,7 +1,16 @@
 {
-  "version": "v1.27.0",
-  "updatedAt": "2026-11-20T22:20:00+09:00",
+  "version": "v1.28.0",
+  "updatedAt": "2026-11-21T09:18:00+09:00",
   "history": [
+    {
+      "version": "v1.28.0",
+      "date": "2026-11-21",
+      "title": "場所キーワード検索の海外地名混入修正＆重複統合",
+      "items": [
+        "Nominatimキーワード検索（インライン／詳細編集の両方）へ countrycodes=jp を付与し、海外地名混入の引き金だった addressdetails=1 を削除",
+        "name＋座標（小数3桁丸め）一致の重複候補を1件に統合する重複除去（dedupeLocationCandidates）を追加"
+      ]
+    },
     {
       "version": "v1.27.0",
       "date": "2026-11-20",

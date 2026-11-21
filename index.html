@@ -9,7 +9,7 @@
   <link rel="manifest" href="./manifest.json">
   <link rel="apple-touch-icon" href="./apple-touch-icon.png">
   <link rel="icon" type="image/png" href="./icon-192.png">
-  <title>ライフログ・ダッシュボード v1.27.0</title>
+  <title>ライフログ・ダッシュボード v1.28.0</title>
   <style>
     :root {
       --bg: #f4f6f9;
@@ -379,7 +379,7 @@
   <div class="header-top">
     <h1 class="app-title">📚 ライフログ・ダッシュボード</h1>
     <div class="header-right">
-      <button type="button" class="ver-badge" id="app-version" onclick="openReleaseNotesModal()" title="変更履歴（リリースノート）を表示">📋 v1.27.0</button>
+      <button type="button" class="ver-badge" id="app-version" onclick="openReleaseNotesModal()" title="変更履歴（リリースノート）を表示">📋 v1.28.0</button>
       <button class="btn-sm" id="btn-check-update" onclick="manualCheckUpdate()" title="最新バージョン確認・更新">🔄 更新</button>
     </div>
   </div>
@@ -680,8 +680,9 @@
 </div>
 
 <script>
-const APP_VERSION = 'v1.27.0';
+const APP_VERSION = 'v1.28.0';
 const DEFAULT_RELEASE_NOTES = [
+  { version: 'v1.28.0', date: '2026-11-21', title: '場所キーワード検索の海外地名混入修正＆重複統合', items: ['Nominatimキーワード検索（インライン／詳細編集の両方）へ countrycodes=jp を付与し、海外地名混入の引き金だった addressdetails=1 を削除', 'name＋座標（小数3桁丸め）一致の重複候補を1件に統合する重複除去（dedupeLocationCandidates）を追加'] },
   { version: 'v1.27.0', date: '2026-11-20', title: '日記インライン場所ピッカー全機能化＆保存不達・入力消失の緊急修正', items: ['日記カードのインライン編集でGPS現在地近傍スポット取得（📍）・キーワード検索（🔍 Nominatim＋国土地理院フォールバック）・スポット並び替え（◀▶）と削除をカード上で完結', '保存リクエストへタイムアウト（25秒／写真時45秒）・clientRequestId冪等性・未送信下書きのlocalStorage永続保持と再送バー（#unsent-diary-bar）を実装し、無音失敗や入力消失を根絶', 'インライン保存時の未定義関数呼び出し（triggerDiaryDocSyncWithRetry）およびエラートースト背景色バグを修正'] },
   { version: 'v1.26.0', date: '2026-11-19', title: 'Wikipedia補完の区分別曖昧さ回避＆作品記事判定', items: ['Wikipedia補完（GAS側）で区分別の曖昧さ回避記事（例：会社員 (ドラマ)）を優先探索し、一般用語記事（例：サラリーマン）への取り違えを防止', 'リダイレクト解決後のカテゴリ・リード文による作品記事健全性チェックを追加し、作品候補が無い場合は一般用語で埋めず空欄のまま見送り'] },
   { version: 'v1.25.0', date: '2026-11-19', title: '横断検索の結果リストへ戻る導線＆閲覧済マーク', items: ['横断検索ヒットから記事へ遷移後、「← 検索結果に戻る」バーを表示し、再検索通信なしで直前の検索結果・スクロール位置を復元', '「飛ぶ→戻る→別のヒットへ飛ぶ」の繰り返し遷移と、直前閲覧／閲覧済みバッジ表示に対応', 'インライン編集中に「戻る」を押した際の3-36未保存保護ルールに対応'] },
@@ -1819,6 +1820,23 @@ async function fetchInlineNearbyLocations(rowNum) {
   }
 }
 
+function dedupeLocationCandidates(items) {
+  const seenKeys = new Set();
+  const out = [];
+  (items || []).forEach(it => {
+    if (!it || !it.name) return;
+    const hasCoords = it.lat !== null && it.lat !== undefined && !isNaN(Number(it.lat)) &&
+      it.lng !== null && it.lng !== undefined && !isNaN(Number(it.lng));
+    const key = hasCoords
+      ? `${it.name}|${Number(it.lat).toFixed(3)}|${Number(it.lng).toFixed(3)}`
+      : `${it.name}|none`;
+    if (seenKeys.has(key)) return;
+    seenKeys.add(key);
+    out.push(it);
+  });
+  return out;
+}
+
 async function searchInlineLocationByKeyword(rowNum) {
   const r = Number(rowNum);
   const input = document.getElementById(`inline-loc-input-diary-${r}`);
@@ -1835,13 +1853,13 @@ async function searchInlineLocationByKeyword(rowNum) {
     let items = [];
     let sourceName = 'OpenStreetMap';
     try {
-      const url = `https://nominatim.openstreetmap.org/search?format=jsonv2&q=${encodeURIComponent(q)}&accept-language=ja&addressdetails=1&limit=8`;
+      const url = `https://nominatim.openstreetmap.org/search?format=jsonv2&q=${encodeURIComponent(q)}&countrycodes=jp&accept-language=ja&limit=8`;
       const res = await fetch(url);
       if (res.ok) {
         const list = await res.json();
         items = (list || []).map(it => {
           const primary = it.name || String(it.display_name || '').split(',')[0].trim();
-          const addrSub = formatAddrSummary(it.address) || String(it.display_name || '');
+          const addrSub = String(it.display_name || '');
           const lat = it.lat !== undefined ? Number(it.lat) : null;
           const lng = it.lon !== undefined ? Number(it.lon) : null;
           return { name: primary, sub: addrSub, lat, lng };
@@ -1867,7 +1885,7 @@ async function searchInlineLocationByKeyword(rowNum) {
 
     const histMatches = getDiaryLocationHistory(q);
     const seenNames = new Set(histMatches.map(h => h.name));
-    const merged = [...histMatches, ...items.filter(it => !seenNames.has(it.name))];
+    const merged = dedupeLocationCandidates([...histMatches, ...items.filter(it => !seenNames.has(it.name))]);
     if (merged.length === 0) {
       if (statusEl) statusEl.textContent = '該当する場所が見つかりませんでした（＋で自由入力追加できます）';
       renderInlineLocationCandidates(r, []);
@@ -3394,15 +3412,15 @@ async function searchLocationByKeyword() {
     let items = [];
     let sourceName = 'OpenStreetMap';
 
-    // 1. OpenStreetMap Nominatim 検索
+    // 1. OpenStreetMap Nominatim 検索（日本国内限定・addressdetails=1除去）
     try {
-      const url = `https://nominatim.openstreetmap.org/search?format=jsonv2&q=${encodeURIComponent(q)}&accept-language=ja&addressdetails=1&limit=8`;
+      const url = `https://nominatim.openstreetmap.org/search?format=jsonv2&q=${encodeURIComponent(q)}&countrycodes=jp&accept-language=ja&limit=8`;
       const res = await fetch(url);
       if (res.ok) {
         const list = await res.json();
         items = (list || []).map(r => {
           const primary = r.name || String(r.display_name || '').split(',')[0].trim();
-          const addrSub = formatAddrSummary(r.address) || String(r.display_name || '');
+          const addrSub = String(r.display_name || '');
           const lat = r.lat !== undefined ? Number(r.lat) : null;
           const lng = r.lon !== undefined ? Number(r.lon) : null;
           return { name: primary, sub: addrSub, lat, lng };
@@ -3427,10 +3445,10 @@ async function searchLocationByKeyword() {
       }
     }
 
-    // 3. キーワードに一致する過去履歴も先頭へ統合（重複除外）
+    // 3. キーワードに一致する過去履歴も先頭へ統合（name＋座標小数3桁丸めで重複除去）
     const histMatches = getDiaryLocationHistory(q);
     const seenNames = new Set(histMatches.map(h => h.name));
-    const merged = [...histMatches, ...items.filter(it => !seenNames.has(it.name))];
+    const merged = dedupeLocationCandidates([...histMatches, ...items.filter(it => !seenNames.has(it.name))]);
 
     if (merged.length === 0) {
       statusEl.textContent = '該当する場所が見つかりませんでした（そのまま自由入力で保存できます）';
