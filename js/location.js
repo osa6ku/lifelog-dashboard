@@ -49,24 +49,46 @@ function moveInlineDiaryLocation(rowNum, idx, delta) {
   renderInlineDiaryLocChips(rowNum);
 }
 
+const inlineLocHideTimers = new Map();
+
+function cancelInlineLocHideTimer(rowNum) {
+  const r = Number(rowNum);
+  const t = inlineLocHideTimers.get(r);
+  if (t) {
+    clearTimeout(t);
+    inlineLocHideTimers.delete(r);
+  }
+}
+
+function closeInlineLocSuggestions(rowNum) {
+  const r = Number(rowNum);
+  cancelInlineLocHideTimer(r);
+  const box = document.getElementById(`inline-loc-suggest-diary-${r}`);
+  if (box) {
+    if (box.dataset) box.dataset.pinned = '';
+    box.classList.remove('open');
+    box.style.display = 'none';
+    box.innerHTML = '';
+  }
+}
+
 function addInlineDiaryLocation(rowNum, rawName, explicitLat, explicitLng) {
   const name = String(rawName || '').trim();
   if (!name) return;
   const r = Number(rowNum);
   const input = document.getElementById(`inline-loc-input-diary-${r}`);
-  const box = document.getElementById(`inline-loc-suggest-diary-${r}`);
   const statusEl = document.getElementById(`inline-loc-status-diary-${r}`);
   if (inlineDiaryLocations.some(l => l.name === name)) {
     if (statusEl) statusEl.textContent = `「${name}」は既に追加されています`;
     if (input) input.value = '';
-    if (box) { box.classList.remove('open'); box.innerHTML = ''; }
+    closeInlineLocSuggestions(r);
     return;
   }
   const coords = resolveInlineLocationCoords(name, explicitLat, explicitLng);
   inlineDiaryLocations.push({ name, lat: coords.lat, lng: coords.lng });
   renderInlineDiaryLocChips(r);
   if (input) input.value = '';
-  if (box) { box.classList.remove('open'); box.innerHTML = ''; }
+  closeInlineLocSuggestions(r);
   if (statusEl) {
     const coordNote = (coords.lat !== null && coords.lng !== null) ? ' (座標取得済)' : '';
     statusEl.textContent = `追加済み: ${name}${coordNote}（計${inlineDiaryLocations.length}件）`;
@@ -84,45 +106,66 @@ function removeInlineDiaryLocation(rowNum, idx) {
   renderInlineDiaryLocChips(rowNum);
 }
 
-function renderInlineLocationCandidates(rowNum, cands) {
+function renderInlineLocationCandidates(rowNum, cands, opts = {}) {
   const r = Number(rowNum);
+  cancelInlineLocHideTimer(r);
   const box = document.getElementById(`inline-loc-suggest-diary-${r}`);
-  if (!box) return;
+  if (!box) return 0;
   const existingNames = new Set(inlineDiaryLocations.map(l => l.name));
   const filtered = (cands || []).filter(c => c && c.name && !existingNames.has(c.name)).slice(0, 15);
   if (filtered.length === 0) {
-    box.classList.remove('open');
-    box.innerHTML = '';
-    return;
+    closeInlineLocSuggestions(r);
+    return 0;
   }
   box.innerHTML = filtered.map(c => {
     const latAttr = (c.lat !== null && c.lat !== undefined) ? String(c.lat) : '';
     const lngAttr = (c.lng !== null && c.lng !== undefined) ? String(c.lng) : '';
     const icon = c.name === '自宅' ? '🏠 ' : (c.name === '会社' ? '🏢 ' : '📍 ');
-    const distNote = (typeof c.dist === 'number' && c.dist < 9000) ? ` (${Math.round(c.dist)}m)` : '';
-    return `<button type="button" class="tag-suggest-item" data-loc-name="${esc(c.name)}" data-loc-lat="${esc(latAttr)}" data-loc-lng="${esc(lngAttr)}" title="${esc(c.sub || '')}" onmousedown="event.preventDefault(); addInlineDiaryLocation(${r}, this.dataset.locName, this.dataset.locLat, this.dataset.locLng)">${icon}${esc(c.name)}${esc(distNote)}</button>`;
+    const distHtml = (typeof c.dist === 'number' && c.dist < 9000) ? `<div class="loc-item-dist">約${Math.round(c.dist)}m</div>` : '';
+    const subHtml = c.sub ? `<div class="loc-item-sub">${esc(c.sub)}</div>` : '';
+    return `<button type="button" class="loc-item" data-loc-name="${esc(c.name)}" data-loc-lat="${esc(latAttr)}" data-loc-lng="${esc(lngAttr)}" onmousedown="event.preventDefault()" onclick="addInlineDiaryLocation(${r}, this.dataset.locName, this.dataset.locLat, this.dataset.locLng)">
+      <div>
+        <div class="loc-item-main">${icon}${esc(c.name)}</div>
+        ${subHtml}
+      </div>
+      ${distHtml}
+    </button>`;
   }).join('');
+  if (box.dataset) box.dataset.pinned = opts.pin ? '1' : '';
   box.classList.add('open');
+  box.style.display = 'block';
+  if (opts.pin && typeof box.scrollIntoView === 'function') {
+    box.scrollIntoView({ block: 'nearest' });
+  }
+  return filtered.length;
 }
 
 function showInlineDiaryLocSuggestions(rowNum) {
   const r = Number(rowNum);
+  cancelInlineLocHideTimer(r);
   const input = document.getElementById(`inline-loc-input-diary-${r}`);
   const statusEl = document.getElementById(`inline-loc-status-diary-${r}`);
   if (!input) return;
   const q = input.value;
   const cands = getDiaryLocationHistory(q);
-  renderInlineLocationCandidates(r, cands);
+  renderInlineLocationCandidates(r, cands, { pin: false });
   if (statusEl && cands.length > 0 && !q.trim()) {
     statusEl.textContent = '定番・履歴から選択 / 📍で現在地近傍 / 🔍でキーワード検索';
   }
 }
 
 function hideInlineDiaryLocSuggestions(rowNum) {
-  setTimeout(() => {
-    const box = document.getElementById(`inline-loc-suggest-diary-${Number(rowNum)}`);
-    if (box) box.classList.remove('open');
-  }, 150);
+  const r = Number(rowNum);
+  cancelInlineLocHideTimer(r);
+  const t = setTimeout(() => {
+    inlineLocHideTimers.delete(r);
+    const box = document.getElementById(`inline-loc-suggest-diary-${r}`);
+    if (!box) return;
+    if (box.dataset && box.dataset.pinned === '1') return;
+    box.classList.remove('open');
+    box.style.display = 'none';
+  }, 200);
+  inlineLocHideTimers.set(r, t);
 }
 
 async function fetchNearbyLocationCandidates(lat, lon) {
@@ -232,6 +275,7 @@ async function searchLocationCandidatesByKeyword(q) {
 
 async function fetchInlineNearbyLocations(rowNum) {
   const r = Number(rowNum);
+  cancelInlineLocHideTimer(r);
   const statusEl = document.getElementById(`inline-loc-status-diary-${r}`);
   if (!('geolocation' in navigator)) {
     if (statusEl) statusEl.textContent = '⚠️ このブラウザは位置情報取得に対応していません';
@@ -254,8 +298,12 @@ async function fetchInlineNearbyLocations(rowNum) {
       if (statusEl) statusEl.textContent = '⚠️ 周辺スポットが見つかりませんでした（手入力も可能です）';
       renderInlineLocationCandidates(r, []);
     } else {
-      if (statusEl) statusEl.textContent = `近傍候補 ${items.length}件（タップで座標付き追加）`;
-      renderInlineLocationCandidates(r, items);
+      const shown = renderInlineLocationCandidates(r, items, { pin: true });
+      if (statusEl) {
+        statusEl.textContent = shown > 0
+          ? `近傍候補 ${shown}件（タップで座標付き追加）`
+          : `近傍候補 ${items.length}件はすべて追加済みです`;
+      }
     }
   } catch {
     if (statusEl) statusEl.textContent = '⚠️ 位置情報の取得に失敗しました（許可設定をご確認ください・入力内容は保持されています）';
@@ -266,6 +314,7 @@ async function fetchInlineNearbyLocations(rowNum) {
 
 async function searchInlineLocationByKeyword(rowNum) {
   const r = Number(rowNum);
+  cancelInlineLocHideTimer(r);
   const input = document.getElementById(`inline-loc-input-diary-${r}`);
   const statusEl = document.getElementById(`inline-loc-status-diary-${r}`);
   const q = input ? input.value.trim() : '';
@@ -282,14 +331,22 @@ async function searchInlineLocationByKeyword(rowNum) {
       if (statusEl) statusEl.textContent = '該当する場所が見つかりませんでした（＋で自由入力追加できます）';
       renderInlineLocationCandidates(r, []);
     } else {
-      if (statusEl) statusEl.textContent = `候補 ${merged.length}件（履歴＋${sourceName}・タップで追加）`;
-      renderInlineLocationCandidates(r, merged);
+      const shown = renderInlineLocationCandidates(r, merged, { pin: true });
+      if (statusEl) {
+        statusEl.textContent = shown > 0
+          ? `候補 ${shown}件（履歴＋${sourceName}・タップで追加）`
+          : `「${q}」の候補 ${merged.length}件はすべて追加済みです`;
+      }
     }
   } catch {
     const histMatches = getDiaryLocationHistory(q);
     if (histMatches.length > 0) {
-      if (statusEl) statusEl.textContent = `過去履歴から ${histMatches.length}件を表示中`;
-      renderInlineLocationCandidates(r, histMatches);
+      const shown = renderInlineLocationCandidates(r, histMatches, { pin: true });
+      if (statusEl) {
+        statusEl.textContent = shown > 0
+          ? `過去履歴から ${shown}件を表示中`
+          : `過去履歴の候補 ${histMatches.length}件はすべて追加済みです`;
+      }
     } else {
       if (statusEl) statusEl.textContent = '⚠️ 場所検索に失敗しました（通信状況をご確認ください・入力内容は保持されています）';
     }
@@ -405,8 +462,11 @@ function removeDiaryLocation(idx) {
 function resetLocationPicker() {
   document.getElementById('loc-status').textContent = '';
   const box = document.getElementById('loc-suggestions');
-  box.style.display = 'none';
-  box.innerHTML = '';
+  if (box) {
+    box.classList.remove('open');
+    box.style.display = 'none';
+    box.innerHTML = '';
+  }
 }
 
 
@@ -427,23 +487,29 @@ function formatAddrSummary(addr) {
 }
 
 let lastLocationCandidates = [];
-function renderLocationSuggestions(items) {
-  lastLocationCandidates = items;
+function renderLocationSuggestions(items, opts = {}) {
+  lastLocationCandidates = items || [];
   const box = document.getElementById('loc-suggestions');
+  if (!box) return;
   if (!items || items.length === 0) {
+    box.classList.remove('open');
     box.style.display = 'none';
     box.innerHTML = '';
     return;
   }
   box.innerHTML = items.map((it, idx) => `
-    <div class="loc-item" onclick="selectLocationCandidate(${idx})">
+    <button type="button" class="loc-item" onclick="selectLocationCandidate(${idx})">
       <div>
         <div class="loc-item-main">${esc(it.name)}</div>
         ${it.sub ? `<div class="loc-item-sub">${esc(it.sub)}</div>` : ''}
       </div>
       ${it.dist !== undefined ? `<div class="loc-item-dist">約${it.dist}m</div>` : ''}
-    </div>`).join('');
+    </button>`).join('');
+  box.classList.add('open');
   box.style.display = 'block';
+  if (opts.scroll && typeof box.scrollIntoView === 'function') {
+    box.scrollIntoView({ block: 'nearest' });
+  }
 }
 
 const LOC_HISTORY_KEY = 'lifelog_loc_history_v1';
@@ -608,7 +674,11 @@ function selectLocationCandidate(idx) {
   document.getElementById('d-loc').value = '';
   const coordNote = (locObj.lat !== null && locObj.lat !== undefined) ? ' (座標取得済)' : '';
   document.getElementById('loc-status').textContent = `追加済み: ${it.name}${coordNote}（計${diaryLocations.length}件・さらに追加可）`;
-  document.getElementById('loc-suggestions').style.display = 'none';
+  const box = document.getElementById('loc-suggestions');
+  if (box) {
+    box.classList.remove('open');
+    box.style.display = 'none';
+  }
 }
 
 async function fetchNearbyLocations() {
@@ -635,7 +705,7 @@ async function fetchNearbyLocations() {
       renderLocationSuggestions([]);
     } else {
       statusEl.textContent = `候補 ${items.length}件（タップで選択）`;
-      renderLocationSuggestions(items);
+      renderLocationSuggestions(items, { scroll: true });
     }
   } catch {
     statusEl.textContent = '⚠️ 位置情報の取得に失敗しました（許可設定をご確認ください）';
@@ -661,13 +731,13 @@ async function searchLocationByKeyword() {
       renderLocationSuggestions([]);
     } else {
       statusEl.textContent = `候補 ${merged.length}件（履歴＋${sourceName}・タップで選択）`;
-      renderLocationSuggestions(merged);
+      renderLocationSuggestions(merged, { scroll: true });
     }
   } catch {
     const histMatches = getDiaryLocationHistory(q);
     if (histMatches.length > 0) {
       statusEl.textContent = `過去履歴から ${histMatches.length}件を表示中`;
-      renderLocationSuggestions(histMatches);
+      renderLocationSuggestions(histMatches, { scroll: true });
     } else {
       statusEl.textContent = '⚠️ 場所検索に失敗しました（ネットワーク状況をご確認ください）';
     }

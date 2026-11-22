@@ -231,6 +231,9 @@ async function openCrossSearchResult(type, idx) {
   } else {
     switchTab('watch');
     document.getElementById('watch-search').value = '';
+    watchSearchActive = false;
+    watchStatusBeforeSearch = null;
+    watchLastSearchQuery = '';
     // ステータス・区分・PFフィルタを対象記事が見えるよう自動調整
     if (statusFilter !== 'ALL' && statusFilter !== entry.status) {
       statusFilter = 'ALL';

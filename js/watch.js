@@ -1,10 +1,43 @@
+function syncWatchStatusChipsUi() {
+  document.querySelectorAll('#status-chips .chip').forEach(c => {
+    c.classList.toggle('active', c.dataset && c.dataset.val === statusFilter);
+  });
+}
+
 async function loadWatchData(opts = {}) {
   const q = document.getElementById('watch-search').value.trim();
   const sort = document.getElementById('watch-sort').value || 'desc';
   const ym = watchPeriodFilter;
-  const isDefault = !q && !ym && sort === 'desc' && statusFilter === '進行中' && catFilter === 'ALL' && platFilter === 'ALL';
   const offset = Number(opts.offset || 0);
   const append = Boolean(opts.append);
+
+  if (!append) {
+    if (q) {
+      if (!watchSearchActive) {
+        watchStatusBeforeSearch = statusFilter;
+        watchSearchActive = true;
+        watchLastSearchQuery = q;
+        if (!opts.fromStatusChip && statusFilter !== 'ALL') {
+          statusFilter = 'ALL';
+          syncWatchStatusChipsUi();
+        }
+      } else if (!opts.fromStatusChip && q !== watchLastSearchQuery) {
+        watchLastSearchQuery = q;
+        if (statusFilter !== 'ALL') {
+          statusFilter = 'ALL';
+          syncWatchStatusChipsUi();
+        }
+      }
+    } else if (watchSearchActive) {
+      statusFilter = watchStatusBeforeSearch || '進行中';
+      watchSearchActive = false;
+      watchStatusBeforeSearch = null;
+      watchLastSearchQuery = '';
+      syncWatchStatusChipsUi();
+    }
+  }
+
+  const isDefault = !q && !ym && sort === 'desc' && statusFilter === '進行中' && catFilter === 'ALL' && platFilter === 'ALL';
 
   const params = {
     api: 'watch',
@@ -50,6 +83,13 @@ function runWatchServerQuery() {
   return loadWatchData({ offset: 0, append: false });
 }
 
+function onWatchSearchInput() {
+  const q = document.getElementById('watch-search').value.trim();
+  if (!q && watchSearchActive) {
+    runWatchServerQuery();
+  }
+}
+
 function stepWatchYear(delta) {
   watchPeriodFilter = shiftYearStr(watchPeriodFilter, delta);
   runWatchServerQuery();
@@ -88,9 +128,13 @@ async function showMoreWatch() {
 
 function setStatusFilter(val, el) {
   statusFilter = val;
-  document.querySelectorAll('#status-chips .chip').forEach(c => c.classList.remove('active'));
-  el.classList.add('active');
-  runWatchServerQuery();
+  if (el) {
+    document.querySelectorAll('#status-chips .chip').forEach(c => c.classList.remove('active'));
+    el.classList.add('active');
+  } else {
+    syncWatchStatusChipsUi();
+  }
+  return loadWatchData({ offset: 0, append: false, fromStatusChip: true });
 }
 
 function setCatFilter(val, el) {

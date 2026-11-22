@@ -99,3 +99,76 @@ test('resolveInlineLocationCoords follows priority and moveInlineDiaryLocation p
   assert.equal(moved[1].name, 'A地点');
   assert.equal(moved[1].lat, 35.68);
 });
+
+test('3-44 inline location search displays clickable candidate list and resists blur hide race', async () => {
+  const mockFetch = async () => ({
+    ok: true,
+    async json() {
+      return [
+        { name: '中山白山神社', display_name: '中山白山神社, 市川市, 千葉県, 日本', lat: '35.7212', lon: '139.9478' },
+      ];
+    },
+  });
+  const { ctx, elements } = loadFrontendContext({ fetch: mockFetch });
+  const input = ctx.document.getElementById('inline-loc-input-diary-42');
+  input.value = '中山白山神社';
+
+  // Simulate blur right before search click (iPad/mobile race)
+  ctx.hideInlineDiaryLocSuggestions(42);
+  await ctx.searchInlineLocationByKeyword(42);
+
+  // Wait past the 200ms blur timeout to verify pinned search results stay visible
+  await new Promise(r => setTimeout(r, 230));
+
+  const box = elements.get('inline-loc-suggest-diary-42');
+  const status = elements.get('inline-loc-status-diary-42');
+  assert.equal(box.style.display, 'block');
+  assert.equal(box.classList.contains('open'), true);
+  assert.equal(box.dataset.pinned, '1');
+  assert.ok(box.innerHTML.includes('中山白山神社'));
+  assert.ok(box.innerHTML.includes('class="loc-item"'));
+  assert.ok(box.innerHTML.includes('onclick="addInlineDiaryLocation(42,'));
+  assert.ok(status.textContent.includes('候補 1件'));
+
+  // Tap candidate and verify coordinates are saved and list closes
+  ctx.addInlineDiaryLocation(42, '中山白山神社', '35.7212', '139.9478');
+  const locs = vm.runInContext('inlineDiaryLocations', ctx);
+  assert.equal(locs.length, 1);
+  assert.equal(locs[0].name, '中山白山神社');
+  assert.equal(locs[0].lat, 35.7212);
+  assert.equal(locs[0].lng, 139.9478);
+  assert.equal(box.style.display, 'none');
+  assert.equal(box.classList.contains('open'), false);
+});
+
+test('3-44 modal location search renders button items and selects with coordinates', async () => {
+  const mockFetch = async () => ({
+    ok: true,
+    async json() {
+      return [
+        { name: '中山白山神社', display_name: '中山白山神社, 市川市, 千葉県, 日本', lat: '35.7212', lon: '139.9478' },
+      ];
+    },
+  });
+  const { ctx, elements } = loadFrontendContext({ fetch: mockFetch });
+  ctx.document.getElementById('d-loc').value = '中山白山神社';
+
+  await ctx.searchLocationByKeyword();
+
+  const box = elements.get('loc-suggestions');
+  const status = elements.get('loc-status');
+  assert.equal(box.style.display, 'block');
+  assert.equal(box.classList.contains('open'), true);
+  assert.ok(box.innerHTML.includes('<button type="button" class="loc-item" onclick="selectLocationCandidate(0)">'));
+  assert.ok(box.innerHTML.includes('中山白山神社'));
+  assert.ok(status.textContent.includes('候補 1件'));
+
+  ctx.selectLocationCandidate(0);
+  const locs = vm.runInContext('diaryLocations', ctx);
+  assert.equal(locs.length, 1);
+  assert.equal(locs[0].name, '中山白山神社');
+  assert.equal(locs[0].lat, 35.7212);
+  assert.equal(locs[0].lng, 139.9478);
+  assert.equal(box.style.display, 'none');
+  assert.equal(box.classList.contains('open'), false);
+});

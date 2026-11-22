@@ -172,18 +172,24 @@
     .btn-icon:disabled { opacity: 0.5; cursor: wait; }
     .loc-status { font-size: 12px; color: var(--muted); margin-top: 4px; min-height: 16px; }
     .loc-suggestions {
-      margin-top: 6px; max-height: 190px; overflow-y: auto;
-      border: 1px solid var(--border); border-radius: 10px; background: #f9fafb;
+      display: none; position: relative; z-index: 10;
+      margin-top: 6px; max-height: 220px; overflow-y: auto;
+      -webkit-overflow-scrolling: touch;
+      border: 1px solid #bfdbfe; border-radius: 10px; background: #ffffff;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.08);
     }
+    .loc-suggestions.open { display: block; }
     .loc-item {
-      padding: 8px 10px; border-bottom: 1px solid var(--border); cursor: pointer;
+      width: 100%; text-align: left; border: none; background: transparent;
+      font-family: inherit;
+      min-height: 44px; padding: 10px 12px; border-bottom: 1px solid var(--border); cursor: pointer;
       display: flex; justify-content: space-between; align-items: center; gap: 8px;
     }
     .loc-item:last-child { border-bottom: none; }
-    .loc-item:active { background: #eff6ff; }
+    .loc-item:hover, .loc-item:active { background: #eff6ff; }
     .loc-item-main { font-size: 13px; font-weight: 600; color: var(--text); }
-    .loc-item-sub { font-size: 11px; color: var(--muted); }
-    .loc-item-dist { font-size: 11px; color: var(--primary); font-weight: 600; white-space: nowrap; }
+    .loc-item-sub { font-size: 11px; color: var(--muted); margin-top: 2px; }
+    .loc-item-dist { font-size: 11px; color: var(--primary); font-weight: 600; white-space: nowrap; flex-shrink: 0; }
     .loc-badge {
       display: inline-flex; align-items: center; gap: 3px;
       background: #eff6ff; color: #1d4ed8; border: 1px solid #bfdbfe;

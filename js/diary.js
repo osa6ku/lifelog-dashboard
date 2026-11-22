@@ -356,7 +356,7 @@ function buildDiaryCardHtml(d) {
             <button type="button" class="btn-sm" id="btn-inline-loc-search-${rowNum}" onclick="searchInlineLocationByKeyword(${rowNum})" title="キーワードで場所を検索">🔍</button>
           </div>
           <div id="inline-loc-status-diary-${rowNum}" class="inline-loc-status"></div>
-          <div id="inline-loc-suggest-diary-${rowNum}" class="tag-suggest-box"></div>
+          <div id="inline-loc-suggest-diary-${rowNum}" class="loc-suggestions" style="display:none;"></div>
         </div>
         <textarea id="inline-ta-diary-${rowNum}" class="inline-edit-ta" oninput="autoResizeTextarea(this, 180)" placeholder="出来事やメモ...">${esc(d.body || '')}</textarea>
         <div class="inline-edit-actions">

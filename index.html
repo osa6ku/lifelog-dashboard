@@ -9,7 +9,7 @@
   <link rel="manifest" href="./manifest.json">
   <link rel="apple-touch-icon" href="./apple-touch-icon.png">
   <link rel="icon" type="image/png" href="./icon-192.png">
-  <title>ライフログ・ダッシュボード v1.30.0</title>
+  <title>ライフログ・ダッシュボード v1.31.0</title>
   <link rel="stylesheet" href="./css/style.css">
 </head>
 <body>
@@ -17,7 +17,7 @@
   <div class="header-top">
     <h1 class="app-title">📚 ライフログ・ダッシュボード</h1>
     <div class="header-right">
-      <button type="button" class="ver-badge" id="app-version" onclick="openReleaseNotesModal()" title="変更履歴（リリースノート）を表示">📋 v1.30.0</button>
+      <button type="button" class="ver-badge" id="app-version" onclick="openReleaseNotesModal()" title="変更履歴（リリースノート）を表示">📋 v1.31.0</button>
       <button class="btn-sm" id="btn-check-update" onclick="manualCheckUpdate()" title="最新バージョン確認・更新">🔄 更新</button>
     </div>
   </div>
@@ -50,7 +50,7 @@
 <main class="container">
   <section id="view-watch" style="display:none;">
     <div class="search-row">
-      <input class="search-input" id="watch-search" type="search" placeholder="タイトル・出演者・スタッフ・メモを全文検索..." onkeydown="if(event.key==='Enter'){event.preventDefault();runWatchServerQuery();}">
+      <input class="search-input" id="watch-search" type="search" placeholder="タイトル・出演者・スタッフ・メモを全文検索..." oninput="onWatchSearchInput()" onsearch="onWatchSearchInput()" onkeydown="if(event.key==='Enter'){event.preventDefault();runWatchServerQuery();}">
       <button type="button" class="btn-sm primary" onclick="runWatchServerQuery()" title="全期間からサーバー検索">🔍</button>
       <button type="button" class="btn-sm" onclick="openCrossSearch(document.getElementById('watch-search').value)" title="日記＋鑑賞記録を横断検索">🌐</button>
       <select class="sort-select" id="watch-sort" onchange="runWatchServerQuery()">
