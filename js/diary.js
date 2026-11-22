@@ -100,11 +100,11 @@ function hasUnsavedInlineChanges() {
     const curBody = bodyEl.value;
     if (curTitle !== String(entry.title || '').trim()) return true;
     if (curBody !== String(entry.body || '')) return true;
-    const origLocNames = normalizeDiaryLocations(entry).map(l => l.name);
-    const curLocNames = inlineDiaryLocations.map(l => l.name);
-    if (origLocNames.length !== curLocNames.length) return true;
-    for (let i = 0; i < origLocNames.length; i++) {
-      if (origLocNames[i] !== curLocNames[i]) return true;
+    const origLocs = normalizeDiaryLocations(entry);
+    if (origLocs.length !== inlineDiaryLocations.length) return true;
+    for (let i = 0; i < origLocs.length; i++) {
+      if (origLocs[i].name !== inlineDiaryLocations[i].name) return true;
+      if (origLocs[i].lat !== inlineDiaryLocations[i].lat || origLocs[i].lng !== inlineDiaryLocations[i].lng) return true;
     }
     return false;
   }

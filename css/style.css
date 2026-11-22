@@ -188,8 +188,14 @@
     .loc-item:last-child { border-bottom: none; }
     .loc-item:hover, .loc-item:active { background: #eff6ff; }
     .loc-item-main { font-size: 13px; font-weight: 600; color: var(--text); }
-    .loc-item-sub { font-size: 11px; color: var(--muted); margin-top: 2px; }
+    .loc-item-sub { font-size: 11px; color: var(--muted); margin-top: 2px; word-break: break-word; }
     .loc-item-dist { font-size: 11px; color: var(--primary); font-weight: 600; white-space: nowrap; flex-shrink: 0; }
+    .loc-update-badge {
+      display: inline-block; margin-left: 6px; padding: 1px 6px;
+      border-radius: 999px; font-size: 10px; font-weight: 700;
+      background: #fef3c7; color: #92400e; border: 1px solid #fde68a;
+      vertical-align: middle;
+    }
     .loc-badge {
       display: inline-flex; align-items: center; gap: 3px;
       background: #eff6ff; color: #1d4ed8; border: 1px solid #bfdbfe;

@@ -172,3 +172,87 @@ test('3-44 modal location search renders button items and selects with coordinat
   assert.equal(box.style.display, 'none');
   assert.equal(box.classList.contains('open'), false);
 });
+
+test('3-46 isSameLocationSpot and filterLocationCandidatesAgainstExisting only exclude same-name + near-coord', () => {
+  const { ctx } = loadFrontendContext();
+  const existing = [
+    { name: '白山神社', lat: 31.5912, lng: 130.5571 },
+    { name: '座標なしスポット', lat: null, lng: null },
+  ];
+  const cands = [
+    { name: '白山神社', sub: '鹿児島県鹿児島市', lat: 31.5913, lng: 130.5572 }, // same name + near coord -> exclude
+    { name: '白山神社', sub: '東京都八王子市北野台', lat: 35.6355, lng: 139.3422 }, // same name + different coord -> keep (update)
+    { name: '座標なしスポット', sub: '東京都新宿区', lat: 35.6896, lng: 139.7006 }, // existing has no coord -> keep (update)
+    { name: '別の神社', sub: '千葉県市川市', lat: 35.7212, lng: 139.9478 }, // new name -> keep (add)
+  ];
+  const filtered = ctx.filterLocationCandidatesAgainstExisting(cands, existing);
+  assert.equal(filtered.length, 3);
+  assert.equal(filtered[0].sub, '東京都八王子市北野台');
+  assert.equal(filtered[0].isCoordUpdate, true);
+  assert.equal(filtered[1].name, '座標なしスポット');
+  assert.equal(filtered[1].isCoordUpdate, true);
+  assert.equal(filtered[2].name, '別の神社');
+  assert.equal(filtered[2].isCoordUpdate, false);
+});
+
+test('3-46 inline and modal pickers show same-name different-coord candidates and replace existing chip coords', async () => {
+  const mockFetch = async () => ({
+    ok: true,
+    async json() {
+      return [
+        { name: '白山神社', display_name: '白山神社, 鹿児島市, 鹿児島県, 日本', lat: '31.5912', lon: '130.5571' },
+        { name: '白山神社', display_name: '白山神社, 北野台, 八王子市, 東京都, 日本', lat: '35.6355', lon: '139.3422' },
+      ];
+    },
+  });
+  const { ctx, elements } = loadFrontendContext({ fetch: mockFetch });
+
+  // Seed existing wrong-coord chip + history in both inline and modal
+  vm.runInContext(`
+    inlineDiaryLocations = [{ name: '白山神社', lat: 31.5912, lng: 130.5571 }];
+    inlineDiaryOrigCoords = new Map([['白山神社', { lat: 31.5912, lng: 130.5571 }]]);
+    diaryLocations = [{ name: '白山神社', lat: 31.5912, lng: 130.5571 }];
+    serverLocationHistory = [{ name: '白山神社', lat: 31.5912, lng: 130.5571, date: '2026-11-21' }];
+  `, ctx);
+
+  // 1) Inline search for 中山白山神社
+  ctx.document.getElementById('inline-loc-input-diary-77').value = '中山白山神社';
+  await ctx.searchInlineLocationByKeyword(77);
+
+  const inlineBox = elements.get('inline-loc-suggest-diary-77');
+  const inlineStatus = elements.get('inline-loc-status-diary-77');
+  assert.equal(inlineBox.style.display, 'block');
+  assert.ok(inlineBox.innerHTML.includes('八王子市'));
+  assert.ok(inlineBox.innerHTML.includes('座標を更新'));
+  assert.ok(!inlineBox.innerHTML.includes('鹿児島市'), 'exact same-name + same-coord candidate must be excluded');
+  assert.ok(inlineStatus.textContent.includes('候補 1件'));
+
+  // Select replacement candidate -> replaces coords on existing chip without duplicating
+  ctx.addInlineDiaryLocation(77, '白山神社', '35.6355', '139.3422');
+  const inlineLocs = vm.runInContext('inlineDiaryLocations', ctx);
+  assert.equal(inlineLocs.length, 1);
+  assert.equal(inlineLocs[0].name, '白山神社');
+  assert.equal(inlineLocs[0].lat, 35.6355);
+  assert.equal(inlineLocs[0].lng, 139.3422);
+  // Ensure save-time resolveInlineLocationCoords also keeps updated coords (not old wrong coords)
+  const resolved = ctx.resolveInlineLocationCoords('白山神社', inlineLocs[0].lat, inlineLocs[0].lng);
+  assert.deepEqual({ lat: resolved.lat, lng: resolved.lng }, { lat: 35.6355, lng: 139.3422 });
+
+  // 2) Modal search for 中山白山神社
+  ctx.document.getElementById('d-loc').value = '中山白山神社';
+  await ctx.searchLocationByKeyword();
+
+  const modalBox = elements.get('loc-suggestions');
+  assert.equal(modalBox.style.display, 'block');
+  assert.ok(modalBox.innerHTML.includes('八王子市'));
+  assert.ok(modalBox.innerHTML.includes('座標を更新'));
+  assert.ok(!modalBox.innerHTML.includes('鹿児島市'));
+
+  ctx.selectLocationCandidate(0);
+  const modalLocs = vm.runInContext('diaryLocations', ctx);
+  assert.equal(modalLocs.length, 1);
+  assert.equal(modalLocs[0].name, '白山神社');
+  assert.equal(modalLocs[0].lat, 35.6355);
+  assert.equal(modalLocs[0].lng, 139.3422);
+  assert.ok(elements.get('loc-status').textContent.includes('座標を更新しました'));
+});

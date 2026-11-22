@@ -1,3 +1,46 @@
+function hasValidCoords(loc) {
+  return Boolean(
+    loc &&
+    loc.lat !== null && loc.lat !== undefined && loc.lat !== '' && !isNaN(Number(loc.lat)) &&
+    loc.lng !== null && loc.lng !== undefined && loc.lng !== '' && !isNaN(Number(loc.lng))
+  );
+}
+
+function isSameLocationSpot(a, b) {
+  if (!a || !b) return false;
+  const nameA = String(a.name || '').trim();
+  const nameB = String(b.name || '').trim();
+  if (!nameA || nameA !== nameB) return false;
+  if (!hasValidCoords(a) || !hasValidCoords(b)) return false;
+  const latA = Number(a.lat), lngA = Number(a.lng);
+  const latB = Number(b.lat), lngB = Number(b.lng);
+  if (latA.toFixed(3) === latB.toFixed(3) && lngA.toFixed(3) === lngB.toFixed(3)) return true;
+  return calcDistanceMeters(latA, lngA, latB, lngB) <= 100;
+}
+
+function filterLocationCandidatesAgainstExisting(cands, existingList) {
+  const existing = Array.isArray(existingList) ? existingList : [];
+  const existingByName = new Map();
+  existing.forEach(l => {
+    const n = String((l && l.name) || '').trim();
+    if (n && !existingByName.has(n)) existingByName.set(n, l);
+  });
+  return (cands || [])
+    .filter(c => c && c.name && !existing.some(ex => isSameLocationSpot(ex, c)))
+    .map(c => ({
+      ...c,
+      isCoordUpdate: existingByName.has(String(c.name).trim()),
+    }));
+}
+
+function formatLocationCandidateSub(c) {
+  const baseSub = String((c && c.sub) || '').trim();
+  if (!hasValidCoords(c)) return baseSub;
+  const coordText = `${Number(c.lat).toFixed(4)}, ${Number(c.lng).toFixed(4)}`;
+  if (baseSub.includes(coordText)) return baseSub;
+  return baseSub ? `${baseSub} (${coordText})` : `座標: ${coordText}`;
+}
+
 function resolveInlineLocationCoords(name, explicitLat, explicitLng) {
   const cleanName = String(name || '').trim();
   // 1. 対象日記の既存スポット座標を最優先
@@ -78,14 +121,41 @@ function addInlineDiaryLocation(rowNum, rawName, explicitLat, explicitLng) {
   const r = Number(rowNum);
   const input = document.getElementById(`inline-loc-input-diary-${r}`);
   const statusEl = document.getElementById(`inline-loc-status-diary-${r}`);
-  if (inlineDiaryLocations.some(l => l.name === name)) {
+  const hasExplicit = hasValidCoords({ lat: explicitLat, lng: explicitLng });
+  const existingIdx = inlineDiaryLocations.findIndex(l => l.name === name);
+  if (existingIdx >= 0) {
+    const existing = inlineDiaryLocations[existingIdx];
+    if (hasExplicit) {
+      const nextLoc = { name, lat: Number(explicitLat), lng: Number(explicitLng) };
+      if (isSameLocationSpot(existing, nextLoc)) {
+        if (statusEl) statusEl.textContent = `「${name}」は同じ座標で既に追加されています`;
+        if (input) input.value = '';
+        closeInlineLocSuggestions(r);
+        return;
+      }
+      inlineDiaryLocations[existingIdx] = nextLoc;
+      inlineDiaryOrigCoords.set(name, { lat: nextLoc.lat, lng: nextLoc.lng });
+      saveLocationToHistory([nextLoc]);
+      renderInlineDiaryLocChips(r);
+      if (input) input.value = '';
+      closeInlineLocSuggestions(r);
+      if (statusEl) {
+        statusEl.textContent = `座標を更新しました: ${name} (${nextLoc.lat.toFixed(4)}, ${nextLoc.lng.toFixed(4)})`;
+      }
+      return;
+    }
     if (statusEl) statusEl.textContent = `「${name}」は既に追加されています`;
     if (input) input.value = '';
     closeInlineLocSuggestions(r);
     return;
   }
   const coords = resolveInlineLocationCoords(name, explicitLat, explicitLng);
-  inlineDiaryLocations.push({ name, lat: coords.lat, lng: coords.lng });
+  const addedLoc = { name, lat: coords.lat, lng: coords.lng };
+  inlineDiaryLocations.push(addedLoc);
+  if (hasValidCoords(addedLoc)) {
+    inlineDiaryOrigCoords.set(name, { lat: addedLoc.lat, lng: addedLoc.lng });
+  }
+  saveLocationToHistory([addedLoc]);
   renderInlineDiaryLocChips(r);
   if (input) input.value = '';
   closeInlineLocSuggestions(r);
@@ -111,8 +181,7 @@ function renderInlineLocationCandidates(rowNum, cands, opts = {}) {
   cancelInlineLocHideTimer(r);
   const box = document.getElementById(`inline-loc-suggest-diary-${r}`);
   if (!box) return 0;
-  const existingNames = new Set(inlineDiaryLocations.map(l => l.name));
-  const filtered = (cands || []).filter(c => c && c.name && !existingNames.has(c.name)).slice(0, 15);
+  const filtered = filterLocationCandidatesAgainstExisting(cands, inlineDiaryLocations).slice(0, 15);
   if (filtered.length === 0) {
     closeInlineLocSuggestions(r);
     return 0;
@@ -121,11 +190,13 @@ function renderInlineLocationCandidates(rowNum, cands, opts = {}) {
     const latAttr = (c.lat !== null && c.lat !== undefined) ? String(c.lat) : '';
     const lngAttr = (c.lng !== null && c.lng !== undefined) ? String(c.lng) : '';
     const icon = c.name === '自宅' ? '🏠 ' : (c.name === '会社' ? '🏢 ' : '📍 ');
+    const updateBadge = c.isCoordUpdate ? '<span class="loc-update-badge">座標を更新</span>' : '';
     const distHtml = (typeof c.dist === 'number' && c.dist < 9000) ? `<div class="loc-item-dist">約${Math.round(c.dist)}m</div>` : '';
-    const subHtml = c.sub ? `<div class="loc-item-sub">${esc(c.sub)}</div>` : '';
+    const subText = formatLocationCandidateSub(c);
+    const subHtml = subText ? `<div class="loc-item-sub">${esc(subText)}</div>` : '';
     return `<button type="button" class="loc-item" data-loc-name="${esc(c.name)}" data-loc-lat="${esc(latAttr)}" data-loc-lng="${esc(lngAttr)}" onmousedown="event.preventDefault()" onclick="addInlineDiaryLocation(${r}, this.dataset.locName, this.dataset.locLat, this.dataset.locLng)">
       <div>
-        <div class="loc-item-main">${icon}${esc(c.name)}</div>
+        <div class="loc-item-main">${icon}${esc(c.name)}${updateBadge}</div>
         ${subHtml}
       </div>
       ${distHtml}
@@ -266,10 +337,9 @@ async function searchLocationCandidatesByKeyword(q) {
     }
   }
 
-  // 3. キーワードに一致する過去履歴も先頭へ統合（name＋座標小数3桁丸めで重複除去）
+  // 3. キーワードに一致する過去履歴も統合（同名・別座標を落とさないよう name＋座標小数3桁丸めで重複除去）
   const histMatches = getDiaryLocationHistory(q);
-  const seenNames = new Set(histMatches.map(h => h.name));
-  const merged = dedupeLocationCandidates([...histMatches, ...items.filter(it => !seenNames.has(it.name))]);
+  const merged = dedupeLocationCandidates([...histMatches, ...items]);
   return { items: merged, sourceName };
 }
 
@@ -424,15 +494,25 @@ function addDiaryLocation(item) {
     }
   }
   const existingIdx = diaryLocations.findIndex(x => x.name === obj.name);
+  let action = 'added';
   if (existingIdx >= 0) {
+    const existing = diaryLocations[existingIdx];
     if (obj.lat !== null && obj.lng !== null) {
-      diaryLocations[existingIdx].lat = obj.lat;
-      diaryLocations[existingIdx].lng = obj.lng;
+      if (isSameLocationSpot(existing, obj)) {
+        action = 'duplicate';
+      } else {
+        diaryLocations[existingIdx].lat = obj.lat;
+        diaryLocations[existingIdx].lng = obj.lng;
+        action = 'updated';
+      }
+    } else {
+      action = 'duplicate';
     }
   } else {
     diaryLocations.push(obj);
   }
   renderLocationChips();
+  return action;
 }
 
 function addLocationFromInput() {
@@ -488,28 +568,34 @@ function formatAddrSummary(addr) {
 
 let lastLocationCandidates = [];
 function renderLocationSuggestions(items, opts = {}) {
-  lastLocationCandidates = items || [];
+  const filtered = filterLocationCandidatesAgainstExisting(items, diaryLocations);
+  lastLocationCandidates = filtered;
   const box = document.getElementById('loc-suggestions');
-  if (!box) return;
-  if (!items || items.length === 0) {
+  if (!box) return 0;
+  if (filtered.length === 0) {
     box.classList.remove('open');
     box.style.display = 'none';
     box.innerHTML = '';
-    return;
+    return 0;
   }
-  box.innerHTML = items.map((it, idx) => `
+  box.innerHTML = filtered.map((it, idx) => {
+    const updateBadge = it.isCoordUpdate ? '<span class="loc-update-badge">座標を更新</span>' : '';
+    const subText = formatLocationCandidateSub(it);
+    return `
     <button type="button" class="loc-item" onclick="selectLocationCandidate(${idx})">
       <div>
-        <div class="loc-item-main">${esc(it.name)}</div>
-        ${it.sub ? `<div class="loc-item-sub">${esc(it.sub)}</div>` : ''}
+        <div class="loc-item-main">${esc(it.name)}${updateBadge}</div>
+        ${subText ? `<div class="loc-item-sub">${esc(subText)}</div>` : ''}
       </div>
       ${it.dist !== undefined ? `<div class="loc-item-dist">約${it.dist}m</div>` : ''}
-    </button>`).join('');
+    </button>`;
+  }).join('');
   box.classList.add('open');
   box.style.display = 'block';
   if (opts.scroll && typeof box.scrollIntoView === 'function') {
     box.scrollIntoView({ block: 'nearest' });
   }
+  return filtered.length;
 }
 
 const LOC_HISTORY_KEY = 'lifelog_loc_history_v1';
@@ -669,11 +755,17 @@ function selectLocationCandidate(idx) {
   const it = lastLocationCandidates[idx];
   if (!it) return;
   const locObj = { name: it.name, lat: it.lat !== undefined ? it.lat : null, lng: it.lng !== undefined ? it.lng : null };
-  addDiaryLocation(locObj);
+  const action = addDiaryLocation(locObj);
   saveLocationToHistory([locObj]);
   document.getElementById('d-loc').value = '';
-  const coordNote = (locObj.lat !== null && locObj.lat !== undefined) ? ' (座標取得済)' : '';
-  document.getElementById('loc-status').textContent = `追加済み: ${it.name}${coordNote}（計${diaryLocations.length}件・さらに追加可）`;
+  const coordNote = (locObj.lat !== null && locObj.lat !== undefined) ? ` (${Number(locObj.lat).toFixed(4)}, ${Number(locObj.lng).toFixed(4)})` : '';
+  if (action === 'updated') {
+    document.getElementById('loc-status').textContent = `座標を更新しました: ${it.name}${coordNote}`;
+  } else if (action === 'duplicate') {
+    document.getElementById('loc-status').textContent = `「${it.name}」は同じ座標で既に追加されています`;
+  } else {
+    document.getElementById('loc-status').textContent = `追加済み: ${it.name}${coordNote ? ' (座標取得済)' : ''}（計${diaryLocations.length}件・さらに追加可）`;
+  }
   const box = document.getElementById('loc-suggestions');
   if (box) {
     box.classList.remove('open');
@@ -704,8 +796,10 @@ async function fetchNearbyLocations() {
       statusEl.textContent = '⚠️ 周辺スポットが見つかりませんでした（手入力も可能です）';
       renderLocationSuggestions([]);
     } else {
-      statusEl.textContent = `候補 ${items.length}件（タップで選択）`;
-      renderLocationSuggestions(items, { scroll: true });
+      const shown = renderLocationSuggestions(items, { scroll: true });
+      statusEl.textContent = shown > 0
+        ? `候補 ${shown}件（タップで選択）`
+        : `近傍候補 ${items.length}件はすべて同じ座標で追加済みです`;
     }
   } catch {
     statusEl.textContent = '⚠️ 位置情報の取得に失敗しました（許可設定をご確認ください）';
@@ -730,14 +824,18 @@ async function searchLocationByKeyword() {
       statusEl.textContent = '該当する場所が見つかりませんでした（そのまま自由入力で保存できます）';
       renderLocationSuggestions([]);
     } else {
-      statusEl.textContent = `候補 ${merged.length}件（履歴＋${sourceName}・タップで選択）`;
-      renderLocationSuggestions(merged, { scroll: true });
+      const shown = renderLocationSuggestions(merged, { scroll: true });
+      statusEl.textContent = shown > 0
+        ? `候補 ${shown}件（履歴＋${sourceName}・タップで選択）`
+        : `「${q}」の候補 ${merged.length}件はすべて同じ座標で追加済みです`;
     }
   } catch {
     const histMatches = getDiaryLocationHistory(q);
     if (histMatches.length > 0) {
-      statusEl.textContent = `過去履歴から ${histMatches.length}件を表示中`;
-      renderLocationSuggestions(histMatches, { scroll: true });
+      const shown = renderLocationSuggestions(histMatches, { scroll: true });
+      statusEl.textContent = shown > 0
+        ? `過去履歴から ${shown}件を表示中`
+        : `過去履歴の候補 ${histMatches.length}件はすべて同じ座標で追加済みです`;
     } else {
       statusEl.textContent = '⚠️ 場所検索に失敗しました（ネットワーク状況をご確認ください）';
     }
