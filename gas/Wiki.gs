@@ -5,10 +5,92 @@ function onOpen() {
     .addItem('「自動補完」チェック済みの行を実行', 'enrichCheckedRows')
     .addSeparator()
     .addItem('プラットフォーム表記揺れを正規化（全行）', 'normalizeAllPlatforms')
+    .addItem('🧹 鑑賞記録DBのHTMLタグ残骸を一括クレンジング（バックアップ付）', 'cleanseWatchHtmlTags')
     .addSeparator()
     .addItem('🌙 年別Doc深夜バッチ同期を設定（毎日3時）', 'installNightlyDocSyncTrigger')
     .addItem('📄 変更のあった年別Docを今すぐ同期', 'syncDirtyDiaryDocsNightly')
     .addToUi();
+}
+
+const HTML_TAG_REMNANT_RE_ = /<\/?[a-zA-Z][a-zA-Z0-9-]*(?:\s[^<>]*?)?\/?>/;
+
+function hasHtmlTagRemnants_(raw) {
+  return HTML_TAG_REMNANT_RE_.test(String(raw || ''));
+}
+
+function sanitizeHtmlText_(raw) {
+  if (raw === null || raw === undefined) return '';
+  let s = String(raw);
+  if (!s) return '';
+  s = s.replace(/\r\n?/g, '\n');
+  s = s.replace(/<br\s*\/?>/gi, '\n');
+  s = s.replace(/<\/p>\s*<p(?:\s[^<>]*?)?>/gi, '\n\n');
+  s = s.replace(/<\/div>\s*<div(?:\s[^<>]*?)?>/gi, '\n');
+  s = s.replace(/<\/(?:p|div|li|h[1-6]|tr|blockquote)>/gi, '\n');
+  // 意図的なMarkdownリンク [text](url) や <https://...> は壊さずHTMLタグのみ除去
+  s = s.replace(/<\/?[a-zA-Z][a-zA-Z0-9-]*(?:\s[^<>]*?)?\/?>/g, '');
+  s = s
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;|&apos;/gi, "'")
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&amp;/gi, '&');
+  s = s.replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n');
+  return s.trim();
+}
+
+function cleanseWatchHtmlTags() {
+  const ss = SpreadsheetApp.openById(WATCH_SS_ID);
+  const sheet = ss.getSheetByName(SHEET_NAME);
+  if (!sheet) return { ok: false, error: 'Sheet not found: ' + SHEET_NAME };
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 2) return { ok: true, totalRows: 0, beforeTagCells: 0, afterTagCells: 0, updatedRows: 0 };
+
+  // 実行前に同スプレッドシート内へ全件バックアップシートを複製保存
+  const ts = Utilities.formatDate(new Date(), 'Asia/Tokyo', 'yyyyMMdd_HHmm');
+  const backupSheetName = `${SHEET_NAME}_backup_${ts}`;
+  const backupSheet = sheet.copyTo(ss);
+  backupSheet.setName(backupSheetName);
+
+  const lastCol = Math.max(15, sheet.getLastColumn());
+  const dataRange = sheet.getRange(2, 1, lastRow - 1, lastCol);
+  const rows = dataRange.getValues();
+  const targetCols = [COL.TITLE - 1, COL.CAST - 1, COL.STAFF - 1, COL.SUMMARY - 1, COL.MEMO - 1];
+
+  let beforeTagCells = 0;
+  let afterTagCells = 0;
+  let updatedRows = 0;
+  const cleanedRows = rows.map(r => {
+    const next = r.slice();
+    let rowChanged = false;
+    targetCols.forEach(cIdx => {
+      const orig = String(next[cIdx] === null || next[cIdx] === undefined ? '' : next[cIdx]);
+      if (hasHtmlTagRemnants_(orig)) beforeTagCells++;
+      const cleaned = sanitizeHtmlText_(orig);
+      if (cleaned !== orig && (hasHtmlTagRemnants_(orig) || /&(?:nbsp|amp|lt|gt|quot|#39|apos);/i.test(orig))) {
+        next[cIdx] = cleaned;
+        rowChanged = true;
+      }
+      if (hasHtmlTagRemnants_(next[cIdx])) afterTagCells++;
+    });
+    if (rowChanged) updatedRows++;
+    return next;
+  });
+
+  if (updatedRows > 0) {
+    dataRange.setValues(cleanedRows);
+  }
+  const summary = {
+    ok: true,
+    backupSheetName,
+    totalRows: rows.length,
+    beforeTagCells,
+    afterTagCells,
+    updatedRows,
+  };
+  Logger.log('cleanseWatchHtmlTags: ' + JSON.stringify(summary));
+  return summary;
 }
 
 /**

@@ -295,6 +295,34 @@ function formatDiaryDateLabel(dateStr, weekday) {
   return weekday ? `${base} (${weekday})` : base;
 }
 
+function onDiaryCardTap(row, id, event) {
+  if (event && event.target && event.target.closest('a, button, select, input, textarea, img, .meal-badge')) return;
+  openEditDiaryModal(Number(row), id);
+}
+
+function captureDiaryModalState() {
+  return JSON.stringify({
+    date: document.getElementById('d-date')?.value || '',
+    time: document.getElementById('d-time')?.value || '',
+    title: document.getElementById('d-title')?.value || '',
+    body: document.getElementById('d-body')?.value || '',
+    locations: diaryLocations.map(l => ({ name: l.name, lat: l.lat, lng: l.lng })),
+    locDraft: document.getElementById('d-loc')?.value || '',
+    mealType: document.getElementById('d-meal-type')?.value || '',
+    cal: document.getElementById('d-cal')?.value || '',
+    p: document.getElementById('d-p')?.value || '',
+    f: document.getElementById('d-f')?.value || '',
+    c: document.getElementById('d-c')?.value || '',
+    advice: document.getElementById('d-nut-advice')?.value || '',
+    removedPhotos: Array.from(removedPhotoUrls).sort(),
+  });
+}
+
+function hasUnsavedDiaryModalChanges() {
+  if (diaryEditSnapshot === null) return false;
+  return captureDiaryModalState() !== diaryEditSnapshot;
+}
+
 function buildDiaryCardHtml(d) {
   const placeholder = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
   const ids = d.imageIds || [];
@@ -318,7 +346,7 @@ function buildDiaryCardHtml(d) {
       }).join('')}${mapLinkHtml}</div>`
     : '';
   const mediaHtml = ids.length > 0
-    ? `<div class="thumb-strip">${ids.map((fid, i) => `<img class="thumb-img" data-file-id="${esc(fid)}" src="${placeholder}" alt="写真${i + 1}" onclick="openImagePreview('${esc(fid)}','${esc(urls[i] || '')}')">`).join('')}</div>`
+    ? `<div class="thumb-strip allow-x-scroll">${ids.map((fid, i) => `<img class="thumb-img" data-file-id="${esc(fid)}" src="${placeholder}" alt="写真${i + 1}" onclick="event.stopPropagation(); openImagePreview('${esc(fid)}','${esc(urls[i] || '')}')">`).join('')}</div>`
     : (urls.length > 0 ? `<div class="meta-row" style="margin-top:8px;">${urls.map((u, i) => `<a class="q-link" target="_blank" href="${esc(u)}">📷 写真${i + 1}</a>`).join('')}</div>` : '');
 
   const dayMeals = mealData.filter(m => m.date === d.date).sort((a, b) => (MEAL_ORDER[a.mealType] || 9) - (MEAL_ORDER[b.mealType] || 9));
@@ -365,19 +393,20 @@ function buildDiaryCardHtml(d) {
           <button class="btn-sm" onclick="openDetailFromInline('diary', ${rowNum}, '${esc(d.id)}')">⚙️ 日付・写真などの詳細</button>
         </div>
       </div>`
-    : `<div class="card-summary editable-text-area" style="white-space:pre-wrap;word-break:break-word;" onclick="startInlineEdit('diary', ${rowNum}, event)">${d.body ? renderRichText(d.body) : '<span style="color:#9ca3af;">タップして本文を追記...</span>'}</div>`;
+    : `<div class="card-summary list-snippet">${d.body ? renderRichText(d.body) : '<span style="color:#9ca3af;">タップして編集・本文を追記...</span>'}</div>`;
+  const timeLabel = d.time ? ` ${d.time}` : '';
   return `
-    <div class="card diary-card" id="dcard-${rowNum}">
+    <div class="card diary-card list-card" id="dcard-${rowNum}" onclick="onDiaryCardTap(${rowNum}, '${esc(d.id)}', event)">
       <div class="card-header">
-        <div class="card-date">${esc(formatDiaryDateLabel(d.date, d.weekday))}</div>
+        <div class="card-date">${esc(formatDiaryDateLabel(d.date, d.weekday))}${esc(timeLabel)}</div>
         ${isEditing ? '' : titleHtml}
       </div>
       ${isEditing ? '' : locHtml}
       ${mediaHtml}
       ${bodyHtml}
       ${mealHtml}
-      ${isEditing ? '' : `<div class="card-actions">
-        <button class="btn-sm primary" onclick="startInlineEdit('diary', ${rowNum})">✏️ 編集</button>
+      ${isEditing ? '' : `<div class="card-actions" onclick="event.stopPropagation()">
+        <button class="btn-sm primary" onclick="openEditDiaryModal(${rowNum}, '${esc(d.id)}')">✏️ 編集</button>
         <button class="btn-sm success" onclick="quickAnalyzeMeal(${rowNum}, '${esc(d.id)}')">🍽️ 栄養分析</button>
         <button class="btn-sm" onclick="openMealModal('${esc(d.date)}')">＋ 食事追加</button>
       </div>`}
@@ -457,6 +486,8 @@ function openDiaryModal() {
   document.getElementById('btn-delete-diary').style.display = 'none';
   document.getElementById('d-photos-label').textContent = '写真（自動で1200px以下にリサイズしてDrive保存）';
   document.getElementById('d-date').value = getLocalTodayIso();
+  const timeEl = document.getElementById('d-time');
+  if (timeEl) timeEl.value = '';
   document.getElementById('d-title').value = '';
   document.getElementById('d-loc').value = '';
   document.getElementById('d-body').value = '';
@@ -471,11 +502,12 @@ function openDiaryModal() {
   renderEditExistingPhotos(null);
   resetLocationPicker();
   showLocationHistory();
+  diaryEditSnapshot = captureDiaryModalState();
   document.getElementById('modal-diary').classList.add('open');
 }
 
 function openEditDiaryModal(row, id) {
-  const entry = diaryData.find(x => (row && x.row === row) || String(x.id) === String(id));
+  const entry = diaryData.find(x => (row && Number(x.row) === Number(row)) || String(x.id) === String(id));
   if (!entry) return;
   editingDiary = entry;
   diaryLocations = normalizeDiaryLocations(entry).map(x => ({ ...x }));
@@ -485,9 +517,11 @@ function openEditDiaryModal(row, id) {
   document.getElementById('btn-delete-diary').style.display = 'block';
   document.getElementById('d-photos-label').textContent = '写真（既存写真の削除 / 新規写真の追加）';
   document.getElementById('d-date').value = entry.date || '';
-  document.getElementById('d-title').value = entry.title || '';
+  const timeEl = document.getElementById('d-time');
+  if (timeEl) timeEl.value = /^\d{2}:\d{2}/.test(String(entry.time || '')) ? String(entry.time).slice(0, 5) : '';
+  document.getElementById('d-title').value = sanitizeDisplayText(entry.title || '');
   document.getElementById('d-loc').value = '';
-  document.getElementById('d-body').value = entry.body || '';
+  document.getElementById('d-body').value = sanitizeDisplayText(entry.body || '');
   document.getElementById('d-meal-type').value = entry.mealType || '';
   document.getElementById('d-cal').value = entry.calories !== '' && entry.calories !== undefined ? entry.calories : '';
   document.getElementById('d-p').value = entry.protein !== '' && entry.protein !== undefined ? entry.protein : '';
@@ -499,6 +533,7 @@ function openEditDiaryModal(row, id) {
   renderEditExistingPhotos(entry);
   resetLocationPicker();
   showLocationHistory();
+  diaryEditSnapshot = captureDiaryModalState();
   document.getElementById('modal-diary').classList.add('open');
 }
 
@@ -641,7 +676,8 @@ async function submitDiary() {
     switchTab('diary');
   }
   editingDiary = null;
-  closeModals();
+  diaryEditSnapshot = null;
+  closeModals(true);
   renderDiary();
   if (document.getElementById('view-nutrition').style.display !== 'none') renderNutritionView();
   showToast('日記を保存中...', 'info', null, 0);
@@ -688,7 +724,8 @@ async function deleteCurrentDiary() {
   const snapshot = diaryData.map(x => ({ ...x }));
   diaryData = diaryData.filter(x => !(target.row && x.row === target.row) && String(x.id) !== String(target.id));
   editingDiary = null;
-  closeModals();
+  diaryEditSnapshot = null;
+  closeModals(true);
   renderDiary();
   if (document.getElementById('view-nutrition').style.display !== 'none') renderNutritionView();
   showToast('日記を削除中...', 'info', null, 0);

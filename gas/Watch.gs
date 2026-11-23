@@ -134,8 +134,8 @@ function addWatchEntry(payload) {
   const lastRow = sheet.getLastRow();
   const nextId = lastRow >= 2 ? Number(sheet.getRange(lastRow, COL.ID).getValue() || lastRow - 1) + 1 : 1;
 
-  const title = String(payload.title || '').trim();
-  const memo = String(payload.memo || '').trim();
+  const title = sanitizeHtmlText_(payload.title || '');
+  const memo = sanitizeHtmlText_(payload.memo || '');
   const normPlat = normalizePlatforms_(String(payload.platform || ''), `${title} ${memo}`);
   const watchDate = payload.watchDate || Utilities.formatDate(new Date(), 'Asia/Tokyo', 'yyyy-MM-dd');
 
@@ -149,9 +149,9 @@ function addWatchEntry(payload) {
     payload.rating || '',
     normPlat,
     payload.releaseYear || '',
-    String(payload.cast || '').trim(),
-    String(payload.staff || '').trim(),
-    String(payload.summary || '').trim(),
+    sanitizeHtmlText_(payload.cast || ''),
+    sanitizeHtmlText_(payload.staff || ''),
+    sanitizeHtmlText_(payload.summary || ''),
     memo,
     payload.relatedUrl || '',
     '',
@@ -203,13 +203,13 @@ function updateWatchCard(payload) {
     sheet.getRange(row, COL.RATING).setValue(payload.rating);
   }
   if (payload.memo !== undefined) {
-    sheet.getRange(row, COL.MEMO).setValue(String(payload.memo).trim());
+    sheet.getRange(row, COL.MEMO).setValue(sanitizeHtmlText_(payload.memo));
   }
   if (payload.cast !== undefined) {
-    sheet.getRange(row, COL.CAST).setValue(String(payload.cast).trim());
+    sheet.getRange(row, COL.CAST).setValue(sanitizeHtmlText_(payload.cast));
   }
   if (payload.staff !== undefined) {
-    sheet.getRange(row, COL.STAFF).setValue(String(payload.staff).trim());
+    sheet.getRange(row, COL.STAFF).setValue(sanitizeHtmlText_(payload.staff));
   }
   if (payload.runWiki) {
     enrichRow_(sheet, row);
@@ -225,8 +225,8 @@ function updateWatchFull(payload) {
   if (row < 2) return { ok: false, error: 'Watch entry not found' };
 
   const cur = sheet.getRange(row, 1, 1, 15).getValues()[0];
-  const title = payload.title !== undefined ? String(payload.title).trim() : String(cur[COL.TITLE - 1] || '');
-  const memo = payload.memo !== undefined ? String(payload.memo).trim() : String(cur[COL.MEMO - 1] || '');
+  const title = payload.title !== undefined ? sanitizeHtmlText_(payload.title) : String(cur[COL.TITLE - 1] || '');
+  const memo = payload.memo !== undefined ? sanitizeHtmlText_(payload.memo) : String(cur[COL.MEMO - 1] || '');
   const rawPlat = payload.platform !== undefined ? String(payload.platform) : String(cur[COL.PLATFORM - 1] || '');
   const normPlat = normalizePlatforms_(rawPlat, `${title} ${memo}`);
   const status = payload.status !== undefined ? String(payload.status) : String(cur[COL.STATUS - 1] || '');
@@ -242,9 +242,9 @@ function updateWatchFull(payload) {
   if (payload.rating !== undefined) sheet.getRange(row, COL.RATING).setValue(payload.rating);
   sheet.getRange(row, COL.PLATFORM).setValue(normPlat);
   if (payload.releaseYear !== undefined) sheet.getRange(row, COL.RELEASE_YEAR).setValue(payload.releaseYear);
-  if (payload.cast !== undefined) sheet.getRange(row, COL.CAST).setValue(payload.cast);
-  if (payload.staff !== undefined) sheet.getRange(row, COL.STAFF).setValue(payload.staff);
-  if (payload.summary !== undefined) sheet.getRange(row, COL.SUMMARY).setValue(payload.summary);
+  if (payload.cast !== undefined) sheet.getRange(row, COL.CAST).setValue(sanitizeHtmlText_(payload.cast));
+  if (payload.staff !== undefined) sheet.getRange(row, COL.STAFF).setValue(sanitizeHtmlText_(payload.staff));
+  if (payload.summary !== undefined) sheet.getRange(row, COL.SUMMARY).setValue(sanitizeHtmlText_(payload.summary));
   sheet.getRange(row, COL.MEMO).setValue(memo);
   if (payload.relatedUrl !== undefined) sheet.getRange(row, COL.RELATED_URL).setValue(payload.relatedUrl);
 

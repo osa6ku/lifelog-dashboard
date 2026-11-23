@@ -30,7 +30,80 @@ async function openReleaseNotesModal() {
   } catch (_) {}
 }
 
+const SWIPE_EDGE_GUARD_PX = 28;
+
+function isSwipeGuardExcludedTarget(target) {
+  if (!target || typeof target.closest !== 'function') return false;
+  return Boolean(target.closest('input, textarea, select, [contenteditable="true"], .allow-x-scroll'));
+}
+
+function shouldPreventSwipeGesture({ type, clientX, startX, startY, clientY, innerWidth, isExcluded, isEdge }) {
+  if (isExcluded) return false;
+  if (type === 'touchstart') {
+    const w = Number(innerWidth || 0);
+    return clientX < SWIPE_EDGE_GUARD_PX || (w > 0 && clientX > w - SWIPE_EDGE_GUARD_PX);
+  }
+  if (type === 'touchmove') {
+    if (isEdge) return true;
+    const dx = Math.abs(clientX - startX);
+    const dy = Math.abs(clientY - startY);
+    return dx > 12 && dx > dy * 1.25;
+  }
+  return false;
+}
+
+let swipeGuardInstalled = false;
+function installNavigationSwipeGuard() {
+  if (swipeGuardInstalled || typeof document === 'undefined' || typeof document.addEventListener !== 'function') return;
+  swipeGuardInstalled = true;
+  let startX = 0;
+  let startY = 0;
+  let isEdge = false;
+  let isExcluded = false;
+
+  document.addEventListener('touchstart', (e) => {
+    if (!e.touches || e.touches.length !== 1) {
+      isEdge = false;
+      isExcluded = true;
+      return;
+    }
+    const t = e.touches[0];
+    startX = t.clientX;
+    startY = t.clientY;
+    isExcluded = isSwipeGuardExcludedTarget(e.target);
+    isEdge = shouldPreventSwipeGesture({
+      type: 'touchstart',
+      clientX: t.clientX,
+      innerWidth: typeof window !== 'undefined' ? window.innerWidth : 0,
+      isExcluded,
+      isEdge: false,
+    });
+    if (isEdge && e.cancelable) {
+      e.preventDefault();
+    }
+  }, { passive: false });
+
+  document.addEventListener('touchmove', (e) => {
+    if (!e.touches || e.touches.length !== 1) return;
+    const t = e.touches[0];
+    const shouldBlock = shouldPreventSwipeGesture({
+      type: 'touchmove',
+      clientX: t.clientX,
+      clientY: t.clientY,
+      startX,
+      startY,
+      innerWidth: typeof window !== 'undefined' ? window.innerWidth : 0,
+      isExcluded,
+      isEdge,
+    });
+    if (shouldBlock && e.cancelable) {
+      e.preventDefault();
+    }
+  }, { passive: false });
+}
+
 window.onload = () => {
+  installNavigationSwipeGuard();
   const today = getLocalTodayIso();
   document.getElementById('w-date').value = today;
   document.getElementById('d-date').value = today;
@@ -119,7 +192,19 @@ async function openImagePreview(fid, driveUrl) {
 }
 
 
-function closeModals() {
+function closeModals(force = false) {
+  if (!force) {
+    const watchModal = document.getElementById('modal-watch');
+    if (watchModal && watchModal.classList.contains('open') && typeof hasUnsavedWatchModalChanges === 'function' && hasUnsavedWatchModalChanges()) {
+      if (!confirm('編集中の未保存内容があります。破棄して閉じますか？')) return;
+    }
+    const diaryModal = document.getElementById('modal-diary');
+    if (diaryModal && diaryModal.classList.contains('open') && typeof hasUnsavedDiaryModalChanges === 'function' && hasUnsavedDiaryModalChanges()) {
+      if (!confirm('編集中の未保存内容があります。破棄して閉じますか？')) return;
+    }
+  }
+  watchEditSnapshot = null;
+  diaryEditSnapshot = null;
   document.querySelectorAll('.modal-backdrop.open').forEach(m => m.classList.remove('open'));
 }
 

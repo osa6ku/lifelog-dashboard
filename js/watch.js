@@ -151,6 +151,182 @@ function setPlatFilter(val, el) {
   runWatchServerQuery();
 }
 
+function onWatchCardTap(row, id, event) {
+  if (event && event.target && event.target.closest('a, button, select, input, textarea')) return;
+  openEditWatchModal(Number(row), id);
+}
+
+function normalizePersonKey(name) {
+  return String(name || '').replace(/[\s　]+/g, '').toLowerCase();
+}
+
+function parsePersonTags(raw) {
+  const clean = sanitizeDisplayText(raw || '');
+  const out = [];
+  const seen = new Set();
+  clean.split(/[,、\n]+/).forEach(part => {
+    const t = part.trim();
+    if (!t) return;
+    const key = normalizePersonKey(t);
+    if (!key || seen.has(key)) return;
+    seen.add(key);
+    out.push(t);
+  });
+  return out;
+}
+
+function getWatchPersonChipList(field) {
+  return field === 'staff' ? watchStaffChips : watchCastChips;
+}
+
+function setWatchPersonChipList(field, list) {
+  if (field === 'staff') watchStaffChips = list;
+  else watchCastChips = list;
+}
+
+function renderWatchPersonChips(field) {
+  const list = getWatchPersonChipList(field);
+  const wrap = document.getElementById(field === 'staff' ? 'w-staff-chips' : 'w-cast-chips');
+  const countEl = document.getElementById(field === 'staff' ? 'w-staff-count' : 'w-cast-count');
+  if (countEl) countEl.textContent = list.length > 0 ? `（${list.length}名）` : '';
+  if (!wrap) return;
+  if (list.length === 0) {
+    wrap.innerHTML = '';
+    return;
+  }
+  const cls = field === 'staff' ? 'person-chip staff' : 'person-chip';
+  wrap.innerHTML = list.map((name, idx) => `
+    <span class="${cls}" id="person-chip-${field}-${idx}">
+      <span>${esc(name)}</span>
+      <button type="button" onclick="removeWatchPersonChip('${field}', ${idx})" title="${esc(name)}を削除">×</button>
+    </span>`).join('');
+}
+
+function addWatchPersonChips(field, rawInput) {
+  const clean = sanitizeDisplayText(rawInput || '');
+  const parts = clean.split(/[,、\n]+/).map(s => s.trim()).filter(Boolean);
+  const warnEl = document.getElementById(field === 'staff' ? 'w-staff-warn' : 'w-cast-warn');
+  if (parts.length === 0) return { added: [], duplicates: [] };
+
+  const list = getWatchPersonChipList(field);
+  const added = [];
+  const duplicates = [];
+
+  parts.forEach(name => {
+    const key = normalizePersonKey(name);
+    const dupIdx = list.findIndex(existing => normalizePersonKey(existing) === key);
+    if (dupIdx >= 0) {
+      duplicates.push({ name, dupIdx });
+    } else {
+      list.push(name);
+      added.push(name);
+    }
+  });
+
+  setWatchPersonChipList(field, list);
+  renderWatchPersonChips(field);
+
+  if (duplicates.length > 0) {
+    const dupNames = duplicates.map(d => `「${d.name}」`).join('、');
+    const msg = `${dupNames}は既に追加されています`;
+    if (warnEl) warnEl.textContent = `⚠️ ${msg}`;
+    showToast(msg, 'info', null, 2500);
+    duplicates.forEach(d => {
+      const chipEl = document.getElementById(`person-chip-${field}-${d.dupIdx}`);
+      if (chipEl) {
+        chipEl.classList.add('dup-flash');
+        setTimeout(() => chipEl.classList.remove('dup-flash'), 1200);
+      }
+    });
+  } else if (warnEl) {
+    warnEl.textContent = '';
+  }
+
+  return { added, duplicates };
+}
+
+function addWatchPersonFromInput(field) {
+  const input = document.getElementById(field === 'staff' ? 'w-staff-input' : 'w-cast-input');
+  const box = document.getElementById(field === 'staff' ? 'w-staff-suggest' : 'w-cast-suggest');
+  if (!input) return;
+  const val = input.value.trim();
+  if (!val) return;
+  const res = addWatchPersonChips(field, val);
+  if (res.added.length > 0 || res.duplicates.length > 0) {
+    input.value = '';
+  }
+  if (box) { box.classList.remove('open'); box.innerHTML = ''; }
+}
+
+function removeWatchPersonChip(field, idx) {
+  const list = getWatchPersonChipList(field);
+  if (idx < 0 || idx >= list.length) return;
+  list.splice(idx, 1);
+  setWatchPersonChipList(field, list);
+  renderWatchPersonChips(field);
+  const warnEl = document.getElementById(field === 'staff' ? 'w-staff-warn' : 'w-cast-warn');
+  if (warnEl) warnEl.textContent = '';
+}
+
+function showWatchChipSuggestions(field) {
+  const input = document.getElementById(field === 'staff' ? 'w-staff-input' : 'w-cast-input');
+  const box = document.getElementById(field === 'staff' ? 'w-staff-suggest' : 'w-cast-suggest');
+  if (!input || !box) return;
+  const query = input.value.trim();
+  if (!query) {
+    box.classList.remove('open');
+    box.innerHTML = '';
+    return;
+  }
+  const qNorm = normalizePersonKey(query);
+  const existingKeys = new Set(getWatchPersonChipList(field).map(normalizePersonKey));
+  const allTags = buildWatchTagCounts(field);
+  const matches = allTags.filter(t => {
+    const tNorm = normalizePersonKey(t.name);
+    if (existingKeys.has(tNorm)) return false;
+    return tNorm.includes(qNorm) || t.name.toLowerCase().includes(query.toLowerCase());
+  }).slice(0, 20);
+  if (matches.length === 0) {
+    box.classList.remove('open');
+    box.innerHTML = '';
+    return;
+  }
+  box.innerHTML = matches.map(t => `<button type="button" class="tag-suggest-item" data-tag-name="${esc(t.name)}" onmousedown="event.preventDefault()" onclick="pickWatchChipSuggestion('${field}', this.dataset.tagName)">${esc(t.name)}（${t.count}）</button>`).join('');
+  box.classList.add('open');
+}
+
+function pickWatchChipSuggestion(field, tagName) {
+  addWatchPersonChips(field, tagName);
+  const input = document.getElementById(field === 'staff' ? 'w-staff-input' : 'w-cast-input');
+  const box = document.getElementById(field === 'staff' ? 'w-staff-suggest' : 'w-cast-suggest');
+  if (input) { input.value = ''; input.focus(); }
+  if (box) { box.classList.remove('open'); box.innerHTML = ''; }
+}
+
+function captureWatchModalState() {
+  return JSON.stringify({
+    title: document.getElementById('w-title')?.value || '',
+    category: document.getElementById('w-cat')?.value || '',
+    platform: document.getElementById('w-plat')?.value || '',
+    status: document.getElementById('w-status')?.value || '',
+    rating: document.getElementById('w-rating')?.value || '',
+    watchDate: document.getElementById('w-date')?.value || '',
+    memo: document.getElementById('w-memo')?.value || '',
+    releaseYear: document.getElementById('w-year')?.value || '',
+    cast: watchCastChips.join(', '),
+    staff: watchStaffChips.join(', '),
+    castDraft: document.getElementById('w-cast-input')?.value || '',
+    staffDraft: document.getElementById('w-staff-input')?.value || '',
+    summary: document.getElementById('w-summary')?.value || '',
+    relatedUrl: document.getElementById('w-url')?.value || '',
+  });
+}
+
+function hasUnsavedWatchModalChanges() {
+  if (watchEditSnapshot === null) return false;
+  return captureWatchModalState() !== watchEditSnapshot;
+}
+
 function renderWatch() {
   const q = document.getElementById('watch-search').value.trim().toLowerCase();
   const sortMode = document.getElementById('watch-sort').value;
@@ -184,51 +360,35 @@ function renderWatch() {
     const nextStatus = item.status === '進行中' ? '完了' : '進行中';
     const nextLabel = item.status === '進行中' ? '✅ 完了にする' : '▶ 進行中に戻す';
     const stars = item.rating ? '★'.repeat(Number(item.rating)) : '';
-    const isEditing = activeInlineEdit && activeInlineEdit.type === 'watch' && Number(activeInlineEdit.row) === Number(item.row);
-    const memoHtml = isEditing
-      ? `<div class="inline-edit-wrap">
-          <textarea id="inline-ta-watch-${item.row}" class="inline-edit-ta" oninput="autoResizeTextarea(this, 180)" placeholder="感想・メモを書き足す...">${esc(item.memo || '')}</textarea>
-          <div class="inline-tag-field">
-            <label>👥 出演者（カンマ区切り・既存候補から選択可）</label>
-            <input id="inline-cast-watch-${item.row}" class="inline-tag-input" value="${esc(item.cast || '')}" placeholder="出演者名を入力..." onfocus="showWatchTagSuggestions('cast', 'inline-cast-watch-${item.row}', 'inline-cast-suggest-${item.row}')" oninput="showWatchTagSuggestions('cast', 'inline-cast-watch-${item.row}', 'inline-cast-suggest-${item.row}')" onblur="hideWatchTagSuggestions('inline-cast-suggest-${item.row}')">
-            <div id="inline-cast-suggest-${item.row}" class="tag-suggest-box"></div>
-          </div>
-          <div class="inline-tag-field">
-            <label>🎬 監督・スタッフ（カンマ区切り・既存候補から選択可）</label>
-            <input id="inline-staff-watch-${item.row}" class="inline-tag-input" value="${esc(item.staff || '')}" placeholder="監督・スタッフ名を入力..." onfocus="showWatchTagSuggestions('staff', 'inline-staff-watch-${item.row}', 'inline-staff-suggest-${item.row}')" oninput="showWatchTagSuggestions('staff', 'inline-staff-watch-${item.row}', 'inline-staff-suggest-${item.row}')" onblur="hideWatchTagSuggestions('inline-staff-suggest-${item.row}')">
-            <div id="inline-staff-suggest-${item.row}" class="tag-suggest-box"></div>
-          </div>
-          <div class="inline-edit-actions">
-            <button class="btn-sm primary" onclick="saveInlineWatch(${item.row})">💾 保存</button>
-            <button class="btn-sm" onclick="cancelInlineEdit()">キャンセル</button>
-            <button class="btn-sm" onclick="openDetailFromInline('watch', ${item.row}, '${esc(item.id)}')">⚙️ 評価・URLなどの詳細</button>
-          </div>
-        </div>`
-      : (item.memo
-          ? `<div class="card-cast editable-text-area" style="white-space:pre-wrap;word-break:break-word;" onclick="startInlineEdit('watch', ${item.row}, event)">📝 ${renderRichText(item.memo)}</div>`
-          : `<div class="card-cast editable-text-area" style="color:#9ca3af;" onclick="startInlineEdit('watch', ${item.row}, event)">📝 タップして感想・メモを追記...</div>`);
+    const cleanTitle = sanitizeDisplayText(item.title);
+    const castList = parsePersonTags(item.cast);
+    const castSummary = castList.length > 0
+      ? `👥 ${castList.length}名: ${castList.slice(0, 6).join(', ')}${castList.length > 6 ? ' …' : ''}`
+      : '';
+    const memoSnippet = item.memo
+      ? `<div class="card-cast list-snippet">📝 ${renderRichText(item.memo)}</div>`
+      : '';
     return `
-      <div class="card" id="wcard-${item.row}">
-        <div class="card-head"><div class="card-title">${esc(item.title)}</div><span class="badge ${bClass}">${esc(item.status || '未設定')}</span></div>
+      <div class="card list-card" id="wcard-${item.row}" onclick="onWatchCardTap(${item.row}, '${esc(item.id)}', event)">
+        <div class="card-head"><div class="card-title">${esc(cleanTitle)}</div><span class="badge ${bClass}">${esc(item.status || '未設定')}</span></div>
         <div class="meta-row">
           <span class="tag-pill">${esc(item.category)}</span>
           ${item.watchDate ? `<span>📅 ${esc(item.watchDate)}</span>` : ''}
           ${item.releaseYear ? `<span>(${esc(item.releaseYear)})</span>` : ''}
           ${stars ? `<span style="color:#f59e0b;font-weight:700;">${stars}</span>` : ''}
+          ${item.platform ? `<span class="tag-pill">📺 ${esc(item.platform)}</span>` : ''}
         </div>
-        ${item.platform ? `<div class="meta-row"><span class="tag-pill">📺 ${esc(item.platform)}</span></div>` : ''}
         ${renderRelatedUrlBadges(item.relatedUrl)}
-        ${item.cast ? `<div class="card-cast">👥 ${esc(item.cast)}</div>` : ''}
-        ${item.summary ? `<div class="card-summary" style="white-space:pre-wrap;word-break:break-word;">${renderRichText(item.summary)}</div>` : ''}
-        ${memoHtml}
-        ${isEditing ? '' : `<div class="card-actions">
-          <button class="btn-sm primary" onclick="startInlineEdit('watch', ${item.row})">✏️ 編集</button>
+        ${castSummary ? `<div class="card-cast">${esc(castSummary)}</div>` : ''}
+        ${memoSnippet}
+        <div class="card-actions" onclick="event.stopPropagation()">
+          <button class="btn-sm primary" onclick="openEditWatchModal(${item.row}, '${esc(item.id)}')">✏️ 編集</button>
           <button class="btn-sm success" onclick="quickUpdate(${item.row}, {status:'${nextStatus}'})">${nextLabel}</button>
           <select class="btn-sm" onchange="if(this.value) quickUpdate(${item.row}, {rating:this.value})">
             <option value="">評価変更</option><option value="5">★5</option><option value="4">★4</option><option value="3">★3</option><option value="2">★2</option><option value="1">★1</option>
           </select>
           <button class="btn-sm" onclick="quickUpdate(${item.row}, {runWiki:true})">🌐 Wikipedia補完</button>
-        </div>`}
+        </div>
       </div>`;
   }).join('');
 }
@@ -461,12 +621,13 @@ async function quickUpdate(row, changes) {
 
 function openWatchModal() {
   editingWatch = null;
+  watchCastChips = [];
+  watchStaffChips = [];
   document.getElementById('watch-modal-title').textContent = '🎬 鑑賞記録を追加';
   document.getElementById('btn-save-watch').textContent = '保存する';
   document.getElementById('btn-delete-watch').style.display = 'none';
   document.getElementById('w-wiki-label').textContent = '登録時にWikipediaからキャスト・概要を自動補完する';
   document.getElementById('w-wiki').checked = true;
-  document.getElementById('watch-extra-details').open = false;
   document.getElementById('w-title').value = '';
   document.getElementById('w-cat').value = 'ドラマ';
   document.getElementById('w-plat').value = '';
@@ -475,42 +636,69 @@ function openWatchModal() {
   document.getElementById('w-date').value = getLocalTodayIso();
   document.getElementById('w-memo').value = '';
   document.getElementById('w-year').value = '';
-  document.getElementById('w-cast').value = '';
-  document.getElementById('w-staff').value = '';
+  document.getElementById('w-cast-input').value = '';
+  document.getElementById('w-staff-input').value = '';
+  document.getElementById('w-cast-warn').textContent = '';
+  document.getElementById('w-staff-warn').textContent = '';
   document.getElementById('w-summary').value = '';
   document.getElementById('w-url').value = '';
+  const notionWrap = document.getElementById('w-notion-wrap');
+  if (notionWrap) notionWrap.style.display = 'none';
+  renderWatchPersonChips('cast');
+  renderWatchPersonChips('staff');
+  watchEditSnapshot = captureWatchModalState();
   document.getElementById('modal-watch').classList.add('open');
 }
 
 function openEditWatchModal(row, id) {
-  const item = watchData.find(x => (row && x.row === row) || String(x.id) === String(id));
+  const item = watchData.find(x => (row && Number(x.row) === Number(row)) || String(x.id) === String(id));
   if (!item) return;
   editingWatch = item;
+  watchCastChips = parsePersonTags(item.cast);
+  watchStaffChips = parsePersonTags(item.staff);
   document.getElementById('watch-modal-title').textContent = '✏️ 鑑賞記録を編集';
   document.getElementById('btn-save-watch').textContent = '変更を保存する';
   document.getElementById('btn-delete-watch').style.display = 'block';
   document.getElementById('w-wiki-label').textContent = '保存時にWikipediaからキャスト・概要を再補完する';
   document.getElementById('w-wiki').checked = false;
-  document.getElementById('watch-extra-details').open = true;
-  document.getElementById('w-title').value = item.title || '';
+  document.getElementById('w-title').value = sanitizeDisplayText(item.title || '');
   document.getElementById('w-cat').value = item.category || 'その他';
   document.getElementById('w-plat').value = item.platform || '';
   document.getElementById('w-status').value = item.status || '進行中';
   document.getElementById('w-rating').value = item.rating || '';
   document.getElementById('w-date').value = item.watchDate || '';
-  document.getElementById('w-memo').value = item.memo || '';
+  document.getElementById('w-memo').value = sanitizeDisplayText(item.memo || '');
   document.getElementById('w-year').value = item.releaseYear || '';
-  document.getElementById('w-cast').value = item.cast || '';
-  document.getElementById('w-staff').value = item.staff || '';
-  document.getElementById('w-summary').value = item.summary || '';
+  document.getElementById('w-cast-input').value = '';
+  document.getElementById('w-staff-input').value = '';
+  document.getElementById('w-cast-warn').textContent = '';
+  document.getElementById('w-staff-warn').textContent = '';
+  document.getElementById('w-summary').value = sanitizeDisplayText(item.summary || '');
   document.getElementById('w-url').value = item.relatedUrl || '';
+  const notionWrap = document.getElementById('w-notion-wrap');
+  const notionLink = document.getElementById('w-notion-link');
+  if (notionWrap && notionLink) {
+    if (item.notionUrl && /^https?:\/\//i.test(String(item.notionUrl).trim())) {
+      notionLink.href = String(item.notionUrl).trim();
+      notionWrap.style.display = 'block';
+    } else {
+      notionWrap.style.display = 'none';
+    }
+  }
+  renderWatchPersonChips('cast');
+  renderWatchPersonChips('staff');
+  watchEditSnapshot = captureWatchModalState();
   document.getElementById('modal-watch').classList.add('open');
 }
 
 
 async function submitWatch() {
-  const title = document.getElementById('w-title').value.trim();
+  const title = sanitizeDisplayText(document.getElementById('w-title').value).trim();
   if (!title) { alert('タイトルを入力してください'); return; }
+
+  // 入力欄に残っている未確定の出演者・スタッフをチップへ反映
+  addWatchPersonFromInput('cast');
+  addWatchPersonFromInput('staff');
 
   const isEdit = Boolean(editingWatch);
   const targetWatch = editingWatch;
@@ -521,11 +709,11 @@ async function submitWatch() {
     status: document.getElementById('w-status').value,
     rating: document.getElementById('w-rating').value,
     watchDate: document.getElementById('w-date').value,
-    memo: document.getElementById('w-memo').value,
+    memo: sanitizeDisplayText(document.getElementById('w-memo').value),
     releaseYear: document.getElementById('w-year').value,
-    cast: document.getElementById('w-cast').value.split(/[,、]/).map(s => s.trim()).filter(Boolean).join(', '),
-    staff: document.getElementById('w-staff').value.split(/[,、]/).map(s => s.trim()).filter(Boolean).join(', '),
-    summary: document.getElementById('w-summary').value,
+    cast: watchCastChips.join(', '),
+    staff: watchStaffChips.join(', '),
+    summary: sanitizeDisplayText(document.getElementById('w-summary').value),
     relatedUrl: document.getElementById('w-url').value,
   };
   if (isEdit) {
@@ -563,7 +751,8 @@ async function submitWatch() {
     watchData.unshift(optimisticItem);
   }
   editingWatch = null;
-  closeModals();
+  watchEditSnapshot = null;
+  closeModals(true);
   renderWatch();
   showToast('鑑賞記録を保存中...', 'info', null, 0);
 
@@ -598,7 +787,8 @@ async function deleteCurrentWatch() {
   const snapshot = watchData.map(x => ({ ...x }));
   watchData = watchData.filter(x => !(target.row && x.row === target.row) && String(x.id) !== String(target.id));
   editingWatch = null;
-  closeModals();
+  watchEditSnapshot = null;
+  closeModals(true);
   renderWatch();
   showToast('鑑賞記録を削除中...', 'info', null, 0);
 

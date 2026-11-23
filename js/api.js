@@ -227,6 +227,31 @@ function resizeImageToJpgBase64(file, maxDim, quality) {
   });
 }
 
+const NOTION_HTML_TAG_RE = /<\/?(?:p|br|div|span|strong|em|b|i|u|s|a|ul|ol|li|h[1-6]|blockquote|pre|code|hr|table|thead|tbody|tr|th|td|font|small|sub|sup)(?:\s[^<>]*?)?\/?>/gi;
+
+function sanitizeDisplayText(raw) {
+  if (raw === null || raw === undefined) return '';
+  let s = String(raw);
+  if (!s) return '';
+  if (!NOTION_HTML_TAG_RE.test(s) && !/&(?:nbsp|amp|lt|gt|quot|#39|apos);/i.test(s)) return s;
+  NOTION_HTML_TAG_RE.lastIndex = 0;
+  s = s.replace(/\r\n?/g, '\n');
+  s = s.replace(/<br\s*\/?>/gi, '\n');
+  s = s.replace(/<\/p>\s*<p(?:\s[^<>]*?)?>/gi, '\n\n');
+  s = s.replace(/<\/div>\s*<div(?:\s[^<>]*?)?>/gi, '\n');
+  s = s.replace(/<\/(?:p|div|li|h[1-6]|tr|blockquote)>/gi, '\n');
+  s = s.replace(NOTION_HTML_TAG_RE, '');
+  s = s
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;|&apos;/gi, "'")
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&amp;/gi, '&');
+  s = s.replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n');
+  return s.trim();
+}
+
 function esc(str) {
   return String(str || '').replace(/[&<>"']/g, s => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[s]));
 }
@@ -286,7 +311,7 @@ function consumeBalancedUrl(s, start, isMarkdown, isAngle) {
 }
 
 function renderRichText(str) {
-  const s = String(str || '');
+  const s = sanitizeDisplayText(str);
   if (!s) return '';
   const startRe = /\[([^\]]+)\]\((<?https?:\/\/)|https?:\/\//g;
   let out = '';

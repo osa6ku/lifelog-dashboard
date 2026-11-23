@@ -318,8 +318,8 @@ function addDiaryEntry(payload) {
   const dateStr = payload.date || Utilities.formatDate(new Date(), 'Asia/Tokyo', 'yyyy-MM-dd');
   const year = dateStr.slice(0, 4);
   const weekday = getWeekdayJa_(dateStr);
-  const title = String(payload.title || '').trim();
-  const body = String(payload.body || '').trim();
+  const title = sanitizeHtmlText_(payload.title || '');
+  const body = sanitizeHtmlText_(payload.body || '');
   const normLocs = normalizeLocationsPayload_(payload.location, payload.locations);
   const location = normLocs.map(l => l.name).join('\n');
 
@@ -435,8 +435,8 @@ function updateDiaryEntry(payload) {
 
   const dateStr = payload.date ? String(payload.date).slice(0, 10) : oldDate;
   const weekday = getWeekdayJa_(dateStr);
-  const title = payload.title !== undefined ? String(payload.title).trim() : oldTitle;
-  const body = payload.body !== undefined ? String(payload.body).trim() : String(rowArr[5] || '');
+  const title = payload.title !== undefined ? sanitizeHtmlText_(payload.title) : oldTitle;
+  const body = payload.body !== undefined ? sanitizeHtmlText_(payload.body) : String(rowArr[5] || '');
   const normLocs = payload.locations !== undefined ? normalizeLocationsPayload_(payload.location, payload.locations) : null;
   const location = normLocs
     ? normLocs.map(l => l.name).join('\n')

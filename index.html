@@ -9,7 +9,7 @@
   <link rel="manifest" href="./manifest.json">
   <link rel="apple-touch-icon" href="./apple-touch-icon.png">
   <link rel="icon" type="image/png" href="./icon-192.png">
-  <title>ライフログ・ダッシュボード v1.32.0</title>
+  <title>ライフログ・ダッシュボード v1.33.0</title>
   <link rel="stylesheet" href="./css/style.css">
 </head>
 <body>
@@ -17,7 +17,7 @@
   <div class="header-top">
     <h1 class="app-title">📚 ライフログ・ダッシュボード</h1>
     <div class="header-right">
-      <button type="button" class="ver-badge" id="app-version" onclick="openReleaseNotesModal()" title="変更履歴（リリースノート）を表示">📋 v1.32.0</button>
+      <button type="button" class="ver-badge" id="app-version" onclick="openReleaseNotesModal()" title="変更履歴（リリースノート）を表示">📋 v1.33.0</button>
       <button class="btn-sm" id="btn-check-update" onclick="manualCheckUpdate()" title="最新バージョン確認・更新">🔄 更新</button>
     </div>
   </div>
@@ -68,13 +68,13 @@
       <span id="watch-period-label" class="period-badge" style="display:none;"></span>
       <button type="button" class="btn-sm" id="btn-watch-reset" style="display:none;" onclick="resetWatchQuery()">↩ 直近に戻す</button>
     </div>
-    <div class="chips" id="status-chips">
+    <div class="chips allow-x-scroll" id="status-chips">
       <button class="chip active" data-val="進行中" onclick="setStatusFilter('進行中', this)">▶ 進行中</button>
       <button class="chip" data-val="完了" onclick="setStatusFilter('完了', this)">✅ 完了</button>
       <button class="chip" data-val="未着手" onclick="setStatusFilter('未着手', this)">📌 観たい/未着手</button>
       <button class="chip" data-val="ALL" onclick="setStatusFilter('ALL', this)">すべて</button>
     </div>
-    <div class="chips" id="cat-chips">
+    <div class="chips allow-x-scroll" id="cat-chips">
       <button class="chip active-green" data-val="ALL" onclick="setCatFilter('ALL', this)">全区分</button>
       <button class="chip" data-val="ドラマ" onclick="setCatFilter('ドラマ', this)">ドラマ</button>
       <button class="chip" data-val="映画" onclick="setCatFilter('映画', this)">映画</button>
@@ -144,8 +144,8 @@
   <button class="nav-btn" id="nav-nutrition" onclick="switchTab('nutrition')"><span>🍽️</span><span>食事・栄養</span></button>
 </nav>
 
-<div class="modal-backdrop" id="modal-watch">
-  <div class="modal">
+<div class="modal-backdrop" id="modal-watch" onclick="if(event.target===this) closeModals()">
+  <div class="modal modal-full-edit">
     <div class="modal-title"><span id="watch-modal-title">🎬 鑑賞記録を追加</span><button class="btn-sm" onclick="closeModals()">✕</button></div>
     <div class="field"><label>タイトル *</label><input id="w-title" placeholder="例: ドラマ『...』"></div>
     <div class="meal-grid">
@@ -156,34 +156,47 @@
       <div class="field"><label>評価（1〜5）</label><select id="w-rating"><option value="">未評価</option><option value="5">★★★★★ (5)</option><option value="4">★★★★ (4)</option><option value="3">★★★ (3)</option><option value="2">★★ (2)</option><option value="1">★ (1)</option></select></div>
       <div class="field"><label>鑑賞日</label><input id="w-date" type="date"></div>
     </div>
-    <div class="field"><label>プラットフォーム（カンマ区切り可）</label><input id="w-plat" placeholder="例: Netflix, 映画館, TBS"></div>
-    <div class="field"><label>メモ・感想</label><textarea id="w-memo" rows="8" style="min-height:220px;line-height:1.6;" oninput="autoResizeTextarea(this, 220)"></textarea></div>
-    <details id="watch-extra-details">
-      <summary>詳細項目（公開年・キャスト・スタッフ・概要・URL）</summary>
+    <div class="meal-grid">
+      <div class="field"><label>プラットフォーム（カンマ区切り可）</label><input id="w-plat" placeholder="例: Netflix, 映画館, TBS"></div>
       <div class="field"><label>公開年・放送年</label><input id="w-year" placeholder="例: 2026"></div>
-      <div class="field">
-        <label>出演者（キャスト・カンマ区切り）</label>
-        <textarea id="w-cast" rows="2" placeholder="名前を入力すると既存候補を表示..." onfocus="showWatchTagSuggestions('cast', 'w-cast', 'w-cast-suggest')" oninput="showWatchTagSuggestions('cast', 'w-cast', 'w-cast-suggest')" onblur="hideWatchTagSuggestions('w-cast-suggest')"></textarea>
-        <div id="w-cast-suggest" class="tag-suggest-box"></div>
+    </div>
+    <div class="field">
+      <label>👥 出演者（キャスト）<span id="w-cast-count"></span></label>
+      <div id="w-cast-chips" class="person-chips-wrap"></div>
+      <div class="loc-row">
+        <input id="w-cast-input" placeholder="名前を入力して Enter / ＋（カンマ区切り一括追加可）" onfocus="showWatchChipSuggestions('cast')" oninput="showWatchChipSuggestions('cast')" onblur="hideWatchTagSuggestions('w-cast-suggest')" onkeydown="if(event.key==='Enter'){event.preventDefault();addWatchPersonFromInput('cast');}">
+        <button type="button" class="btn-icon" onclick="addWatchPersonFromInput('cast')" title="出演者を追加">＋</button>
       </div>
-      <div class="field">
-        <label>監督・脚本・スタッフ（カンマ区切り）</label>
-        <input id="w-staff" placeholder="名前を入力すると既存候補を表示..." onfocus="showWatchTagSuggestions('staff', 'w-staff', 'w-staff-suggest')" oninput="showWatchTagSuggestions('staff', 'w-staff', 'w-staff-suggest')" onblur="hideWatchTagSuggestions('w-staff-suggest')">
-        <div id="w-staff-suggest" class="tag-suggest-box"></div>
+      <div id="w-cast-warn" class="person-chip-warn"></div>
+      <div id="w-cast-suggest" class="tag-suggest-box"></div>
+    </div>
+    <div class="field">
+      <label>🎬 監督・脚本・スタッフ <span id="w-staff-count"></span></label>
+      <div id="w-staff-chips" class="person-chips-wrap"></div>
+      <div class="loc-row">
+        <input id="w-staff-input" placeholder="名前を入力して Enter / ＋（カンマ区切り一括追加可）" onfocus="showWatchChipSuggestions('staff')" oninput="showWatchChipSuggestions('staff')" onblur="hideWatchTagSuggestions('w-staff-suggest')" onkeydown="if(event.key==='Enter'){event.preventDefault();addWatchPersonFromInput('staff');}">
+        <button type="button" class="btn-icon" onclick="addWatchPersonFromInput('staff')" title="スタッフを追加">＋</button>
       </div>
-      <div class="field"><label>作品概要</label><textarea id="w-summary" rows="3"></textarea></div>
-      <div class="field"><label>関連URL</label><input id="w-url" type="url" placeholder="https://..."></div>
-    </details>
+      <div id="w-staff-warn" class="person-chip-warn"></div>
+      <div id="w-staff-suggest" class="tag-suggest-box"></div>
+    </div>
+    <div class="field"><label>関連URL</label><input id="w-url" type="url" placeholder="https://..."></div>
+    <div class="field"><label>作品概要</label><textarea id="w-summary" rows="3"></textarea></div>
+    <div class="field"><label>メモ・感想</label><textarea id="w-memo" rows="8" style="min-height:220px;line-height:1.6;" oninput="autoResizeTextarea(this, 220)"></textarea></div>
+    <div class="field" id="w-notion-wrap" style="display:none;"><label>Notion元URL</label><a id="w-notion-link" class="related-url-badge" target="_blank" rel="noopener noreferrer" href="#">🔗 Notion元ページを開く</a></div>
     <div class="field"><label><input type="checkbox" id="w-wiki" checked style="width:auto;"> <span id="w-wiki-label">登録時にWikipediaからキャスト・概要を自動補完する</span></label></div>
     <button class="btn-big btn-watch" style="width:100%;" id="btn-save-watch" onclick="submitWatch()">保存する</button>
     <button class="btn-danger" id="btn-delete-watch" style="display:none;" onclick="deleteCurrentWatch()">🗑️ この鑑賞記録を削除</button>
   </div>
 </div>
 
-<div class="modal-backdrop" id="modal-diary">
-  <div class="modal">
+<div class="modal-backdrop" id="modal-diary" onclick="if(event.target===this) closeModals()">
+  <div class="modal modal-full-edit">
     <div class="modal-title"><span id="diary-modal-title">📓 日記を書く</span><button class="btn-sm" onclick="closeModals()">✕</button></div>
-    <div class="field"><label>日付</label><input id="d-date" type="date"></div>
+    <div class="meal-grid">
+      <div class="field"><label>日付</label><input id="d-date" type="date"></div>
+      <div class="field"><label>時刻</label><input id="d-time" type="time"></div>
+    </div>
     <div class="field"><label>タイトル</label><input id="d-title" placeholder="今日のタイトル"></div>
     <div class="field">
       <label>場所・位置情報（複数スポット追加可）</label>
