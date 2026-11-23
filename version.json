@@ -1,7 +1,17 @@
 {
-  "version": "v1.33.0",
-  "updatedAt": "2026-11-23T09:05:00+09:00",
+  "version": "v1.33.1",
+  "updatedAt": "2026-11-23T12:38:00+09:00",
   "history": [
+    {
+      "version": "v1.33.1",
+      "date": "2026-11-23",
+      "title": "Mac・スマホでの起動直後／タブ移動直後のスクロール・タップ不能を修正",
+      "items": [
+        "html, body の overflow-x: hidden を overflow-x: clip へ変更し、macOS Safari / Chrome でのトラックパッド・ホイール縦スクロール固着を解消",
+        "touchstart での preventDefault() を完全廃止（passive: true 化）し、スマホ画面端からの縦スクロール開始および下部タブバー端寄りタップが確実に反応するよう修正",
+        "JSエッジスワイプ抑止を「左右端28px以内開始」かつ「明確な横優勢（dx > 24 かつ dx > dy × 2）」の touchmove のみに限定"
+      ]
+    },
     {
       "version": "v1.33.0",
       "date": "2026-11-23",

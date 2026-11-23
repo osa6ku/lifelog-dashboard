@@ -1,24 +1,65 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
 import vm from 'node:vm';
 import { loadFrontendContext, loadGasContext } from './helpers/load-scripts.mjs';
 
-test('3-48 swipe guard blocks edge and horizontal swipes while allowing vertical scroll and excluded targets', () => {
-  const { ctx } = loadFrontendContext();
+test('3-48 / 3-50 swipe guard never prevents touchstart or vertical scroll, and only blocks strong edge horizontal touchmove', () => {
+  const listeners = {};
+  const { ctx } = loadFrontendContext({
+    document: {
+      getElementById() { return null; },
+      querySelector() { return null; },
+      querySelectorAll() { return []; },
+      addEventListener(type, fn, opts) { listeners[type] = { fn, opts }; },
+      visibilityState: 'visible',
+    },
+    extraGlobals: { innerWidth: 390 },
+  });
 
-  // Edge touchstart (left & right within 28px) -> blocked
-  assert.equal(ctx.shouldPreventSwipeGesture({ type: 'touchstart', clientX: 12, innerWidth: 390, isExcluded: false, isEdge: false }), true);
-  assert.equal(ctx.shouldPreventSwipeGesture({ type: 'touchstart', clientX: 380, innerWidth: 390, isExcluded: false, isEdge: false }), true);
-  // Center touchstart -> allowed
-  assert.equal(ctx.shouldPreventSwipeGesture({ type: 'touchstart', clientX: 180, innerWidth: 390, isExcluded: false, isEdge: false }), false);
-  // Excluded target (input / .allow-x-scroll) -> never blocked even at edge
-  assert.equal(ctx.shouldPreventSwipeGesture({ type: 'touchstart', clientX: 10, innerWidth: 390, isExcluded: true, isEdge: false }), false);
-  // Vertical scroll touchmove -> allowed
-  assert.equal(ctx.shouldPreventSwipeGesture({ type: 'touchmove', startX: 180, startY: 200, clientX: 184, clientY: 280, innerWidth: 390, isExcluded: false, isEdge: false }), false);
-  // Horizontal swipe outside .allow-x-scroll -> blocked
-  assert.equal(ctx.shouldPreventSwipeGesture({ type: 'touchmove', startX: 180, startY: 200, clientX: 240, clientY: 205, innerWidth: 390, isExcluded: false, isEdge: false }), true);
-  // Horizontal swipe inside .allow-x-scroll -> allowed
-  assert.equal(ctx.shouldPreventSwipeGesture({ type: 'touchmove', startX: 180, startY: 200, clientX: 240, clientY: 205, innerWidth: 390, isExcluded: true, isEdge: false }), false);
+  // 1) Pure logic checks
+  // touchstart is NEVER prevented even at edges
+  assert.equal(ctx.shouldPreventSwipeGesture({ type: 'touchstart', clientX: 5, innerWidth: 390, isExcluded: false, isEdge: true }), false);
+  assert.equal(ctx.shouldPreventSwipeGesture({ type: 'touchstart', clientX: 385, innerWidth: 390, isExcluded: false, isEdge: true }), false);
+  // Edge start detection
+  assert.equal(ctx.isSwipeEdgeStart(12, 390, false), true);
+  assert.equal(ctx.isSwipeEdgeStart(380, 390, false), true);
+  assert.equal(ctx.isSwipeEdgeStart(180, 390, false), false);
+  assert.equal(ctx.isSwipeEdgeStart(10, 390, true), false);
+  // Vertical scroll or thumb-arc from edge -> NEVER blocked
+  assert.equal(ctx.shouldPreventSwipeGesture({ type: 'touchmove', startX: 380, startY: 200, clientX: 365, clientY: 240, isExcluded: false, isEdge: true }), false);
+  // Strong horizontal swipe from edge -> blocked
+  assert.equal(ctx.shouldPreventSwipeGesture({ type: 'touchmove', startX: 10, startY: 200, clientX: 50, clientY: 208, isExcluded: false, isEdge: true }), true);
+  // Non-edge horizontal swipe -> NOT blocked
+  assert.equal(ctx.shouldPreventSwipeGesture({ type: 'touchmove', startX: 180, startY: 200, clientX: 240, clientY: 205, isExcluded: false, isEdge: false }), false);
+  // Excluded target (.allow-x-scroll / .bottom-nav / input) -> NEVER blocked
+  assert.equal(ctx.shouldPreventSwipeGesture({ type: 'touchmove', startX: 10, startY: 200, clientX: 50, clientY: 205, isExcluded: true, isEdge: true }), false);
+
+  // 2) Installed listener checks: touchstart must be passive and must never call preventDefault
+  ctx.installNavigationSwipeGuard();
+  assert.equal(listeners.touchstart.opts.passive, true);
+  let startPrevented = false;
+  listeners.touchstart.fn({
+    touches: [{ clientX: 382, clientY: 300 }],
+    target: { closest: () => null },
+    cancelable: true,
+    preventDefault() { startPrevented = true; },
+  });
+  assert.equal(startPrevented, false, 'touchstart must never call preventDefault()');
+
+  let verticalPrevented = false;
+  listeners.touchmove.fn({
+    touches: [{ clientX: 372, clientY: 360 }],
+    cancelable: true,
+    preventDefault() { verticalPrevented = true; },
+  });
+  assert.equal(verticalPrevented, false, 'vertical scroll from edge must not be prevented');
+
+  // 3) CSS check: html, body must use overflow-x: clip (not overflow-x: hidden which breaks macOS scrolling)
+  const css = fs.readFileSync(path.join(process.cwd(), 'css/style.css'), 'utf8');
+  assert.ok(css.includes('overflow-x: clip;'), 'css/style.css must use overflow-x: clip on html, body');
+  assert.ok(!/html,\s*body\s*\{[^}]*overflow-x:\s*hidden/.test(css), 'html, body must not set overflow-x: hidden');
 });
 
 test('3-49 sanitizeDisplayText and GAS sanitizeHtmlText_ strip HTML remnants while preserving Markdown links and line breaks', () => {

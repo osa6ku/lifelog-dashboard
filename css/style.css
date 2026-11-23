@@ -11,7 +11,7 @@
     * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
     html, body {
       overscroll-behavior: none;
-      overflow-x: hidden;
+      overflow-x: clip;
     }
     body {
       margin: 0; padding: 0 0 84px 0;

@@ -1,6 +1,6 @@
 {
   "name": "lifelog-dashboard",
-  "version": "1.33.0",
+  "version": "1.33.1",
   "private": true,
   "description": "Lifelog Dashboard (GitHub Pages PWA + GAS)",
   "scripts": {

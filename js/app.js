@@ -34,20 +34,23 @@ const SWIPE_EDGE_GUARD_PX = 28;
 
 function isSwipeGuardExcludedTarget(target) {
   if (!target || typeof target.closest !== 'function') return false;
-  return Boolean(target.closest('input, textarea, select, [contenteditable="true"], .allow-x-scroll'));
+  return Boolean(target.closest('input, textarea, select, [contenteditable="true"], .allow-x-scroll, .bottom-nav'));
 }
 
-function shouldPreventSwipeGesture({ type, clientX, startX, startY, clientY, innerWidth, isExcluded, isEdge }) {
+function isSwipeEdgeStart(clientX, innerWidth, isExcluded) {
   if (isExcluded) return false;
-  if (type === 'touchstart') {
-    const w = Number(innerWidth || 0);
-    return clientX < SWIPE_EDGE_GUARD_PX || (w > 0 && clientX > w - SWIPE_EDGE_GUARD_PX);
-  }
+  const w = Number(innerWidth || 0);
+  return clientX < SWIPE_EDGE_GUARD_PX || (w > 0 && clientX > w - SWIPE_EDGE_GUARD_PX);
+}
+
+function shouldPreventSwipeGesture({ type, clientX, startX, startY, clientY, isExcluded, isEdge }) {
+  // touchstart では絶対に preventDefault しない（タップ・縦スクロール開始を阻害しないため）
+  if (type === 'touchstart') return false;
+  if (isExcluded || !isEdge) return false;
   if (type === 'touchmove') {
-    if (isEdge) return true;
     const dx = Math.abs(clientX - startX);
     const dy = Math.abs(clientY - startY);
-    return dx > 12 && dx > dy * 1.25;
+    return dx > 24 && dx > dy * 2;
   }
   return false;
 }
@@ -71,17 +74,12 @@ function installNavigationSwipeGuard() {
     startX = t.clientX;
     startY = t.clientY;
     isExcluded = isSwipeGuardExcludedTarget(e.target);
-    isEdge = shouldPreventSwipeGesture({
-      type: 'touchstart',
-      clientX: t.clientX,
-      innerWidth: typeof window !== 'undefined' ? window.innerWidth : 0,
-      isExcluded,
-      isEdge: false,
-    });
-    if (isEdge && e.cancelable) {
-      e.preventDefault();
-    }
-  }, { passive: false });
+    isEdge = isSwipeEdgeStart(
+      t.clientX,
+      typeof window !== 'undefined' ? window.innerWidth : 0,
+      isExcluded
+    );
+  }, { passive: true });
 
   document.addEventListener('touchmove', (e) => {
     if (!e.touches || e.touches.length !== 1) return;
@@ -92,7 +90,6 @@ function installNavigationSwipeGuard() {
       clientY: t.clientY,
       startX,
       startY,
-      innerWidth: typeof window !== 'undefined' ? window.innerWidth : 0,
       isExcluded,
       isEdge,
     });
