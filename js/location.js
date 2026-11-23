@@ -191,7 +191,8 @@ function renderInlineLocationCandidates(rowNum, cands, opts = {}) {
     const lngAttr = (c.lng !== null && c.lng !== undefined) ? String(c.lng) : '';
     const icon = c.name === '自宅' ? '🏠 ' : (c.name === '会社' ? '🏢 ' : '📍 ');
     const updateBadge = c.isCoordUpdate ? '<span class="loc-update-badge">座標を更新</span>' : '';
-    const distHtml = (typeof c.dist === 'number' && c.dist < 9000) ? `<div class="loc-item-dist">約${Math.round(c.dist)}m</div>` : '';
+    const distText = formatDistanceBadge(c.dist);
+    const distHtml = distText ? `<div class="loc-item-dist">${esc(distText)}</div>` : '';
     const subText = formatLocationCandidateSub(c);
     const subHtml = subText ? `<div class="loc-item-sub">${esc(subText)}</div>` : '';
     return `<button type="button" class="loc-item" data-loc-name="${esc(c.name)}" data-loc-lat="${esc(latAttr)}" data-loc-lng="${esc(lngAttr)}" onmousedown="event.preventDefault()" onclick="addInlineDiaryLocation(${r}, this.dataset.locName, this.dataset.locLat, this.dataset.locLng)">
@@ -300,23 +301,106 @@ function dedupeLocationCandidates(items) {
   return out;
 }
 
-async function searchLocationCandidatesByKeyword(q) {
+function formatDistanceBadge(dist) {
+  if (typeof dist !== 'number' || isNaN(dist) || !isFinite(dist) || dist < 0) return '';
+  if (dist < 1000) return `約${Math.round(dist)}m`;
+  if (dist < 100000) return `約${(dist / 1000).toFixed(1)}km`;
+  return `約${Math.round(dist / 1000)}km`;
+}
+
+function getSearchReferencePoint(referenceLocations) {
+  // 1. 編集中エントリに既存チップがあれば、有効座標を持つ最新地点を優先
+  if (Array.isArray(referenceLocations)) {
+    for (let i = referenceLocations.length - 1; i >= 0; i--) {
+      if (hasValidCoords(referenceLocations[i])) {
+        return { lat: Number(referenceLocations[i].lat), lng: Number(referenceLocations[i].lng) };
+      }
+    }
+  }
+  // 2. 無ければ直近で使った地点（履歴キャッシュ → 取得済み日記 → サーバー履歴）
+  const recentSources = [
+    ...getSavedLocHistory(),
+    ...diaryData.flatMap(d => normalizeDiaryLocations(d)),
+    ...serverLocationHistory,
+  ];
+  for (let i = 0; i < recentSources.length; i++) {
+    if (hasValidCoords(recentSources[i])) {
+      return { lat: Number(recentSources[i].lat), lng: Number(recentSources[i].lng) };
+    }
+  }
+  return null;
+}
+
+function buildRelaxedLocationQueries(rawQuery) {
+  const normalized = String(rawQuery || '').replace(/　+/g, ' ').trim();
+  if (!normalized) return [];
+  const tokens = normalized.split(/\s+/).filter(Boolean);
+  const candidates = [];
+  const pushUnique = (q) => {
+    const clean = String(q || '').trim();
+    if (clean && clean !== normalized && !candidates.includes(clean)) {
+      candidates.push(clean);
+    }
+  };
+  if (tokens.length >= 2) {
+    const last = tokens[tokens.length - 1];
+    const strippedSuffix = last.replace(/(?:駅前店|本店|支店|営業所|店)$/, '');
+    if (strippedSuffix && strippedSuffix !== last && strippedSuffix.length >= 2) {
+      pushUnique([...tokens.slice(0, -1), strippedSuffix].join(' '));
+    }
+    for (let len = tokens.length - 1; len >= 1; len--) {
+      pushUnique(tokens.slice(0, len).join(' '));
+    }
+  }
+  return candidates;
+}
+
+async function fetchNominatimCandidates(q, refPoint, limit = 15) {
+  let url = `https://nominatim.openstreetmap.org/search?format=jsonv2&q=${encodeURIComponent(q)}&countrycodes=jp&accept-language=ja&limit=${limit}`;
+  if (refPoint && hasValidCoords(refPoint)) {
+    const delta = 0.15;
+    const left = (Number(refPoint.lng) - delta).toFixed(4);
+    const top = (Number(refPoint.lat) + delta).toFixed(4);
+    const right = (Number(refPoint.lng) + delta).toFixed(4);
+    const bottom = (Number(refPoint.lat) - delta).toFixed(4);
+    // bounded=1 は付けず近傍バイアスのみ付与（近くに候補が無い場合も遠方候補を拾える）
+    url += `&viewbox=${left},${top},${right},${bottom}`;
+  }
+  const res = await fetch(url);
+  if (!res.ok) return [];
+  const list = await res.json();
+  return (list || []).map(it => {
+    const primary = it.name || String(it.display_name || '').split(',')[0].trim();
+    const addrSub = String(it.display_name || '');
+    const lat = it.lat !== undefined ? Number(it.lat) : null;
+    const lng = it.lon !== undefined ? Number(it.lon) : null;
+    return { name: primary, sub: addrSub, lat, lng };
+  }).filter(it => it.name);
+}
+
+async function searchLocationCandidatesByKeyword(q, opts = {}) {
+  const refPoint = (opts && opts.refPoint && hasValidCoords(opts.refPoint))
+    ? { lat: Number(opts.refPoint.lat), lng: Number(opts.refPoint.lng) }
+    : getSearchReferencePoint(opts && opts.referenceLocations);
   let items = [];
   let sourceName = 'OpenStreetMap';
+  let relaxedQuery = '';
 
-  // 1. OpenStreetMap Nominatim 検索（日本国内限定・addressdetails=1除去）
+  // 1. OpenStreetMap Nominatim 検索（日本国内限定・addressdetails=1除去・近傍viewboxバイアス）
   try {
-    const url = `https://nominatim.openstreetmap.org/search?format=jsonv2&q=${encodeURIComponent(q)}&countrycodes=jp&accept-language=ja&limit=8`;
-    const res = await fetch(url);
-    if (res.ok) {
-      const list = await res.json();
-      items = (list || []).map(it => {
-        const primary = it.name || String(it.display_name || '').split(',')[0].trim();
-        const addrSub = String(it.display_name || '');
-        const lat = it.lat !== undefined ? Number(it.lat) : null;
-        const lng = it.lon !== undefined ? Number(it.lon) : null;
-        return { name: primary, sub: addrSub, lat, lng };
-      }).filter(it => it.name);
+    items = await fetchNominatimCandidates(q, refPoint, 15);
+    // 0件時は支店名・修飾語を段階的に落として自動再検索
+    if (items.length === 0) {
+      const relaxedList = buildRelaxedLocationQueries(q);
+      for (let i = 0; i < relaxedList.length; i++) {
+        const retryQ = relaxedList[i];
+        const retryItems = await fetchNominatimCandidates(retryQ, refPoint, 15);
+        if (retryItems.length > 0) {
+          items = retryItems;
+          relaxedQuery = retryQ;
+          break;
+        }
+      }
     }
   } catch { /* fallback to GSI */ }
 
@@ -327,7 +411,7 @@ async function searchLocationCandidatesByKeyword(q) {
     const gRes = await fetch(gsiUrl);
     if (gRes.ok) {
       const gList = await gRes.json();
-      items = (gList || []).slice(0, 10).map(it => {
+      items = (gList || []).slice(0, 15).map(it => {
         const title = String((it.properties && it.properties.title) || '').trim();
         const coords = (it.geometry && it.geometry.coordinates) || [];
         const lng = coords.length >= 2 ? Number(coords[0]) : null;
@@ -338,9 +422,25 @@ async function searchLocationCandidatesByKeyword(q) {
   }
 
   // 3. キーワードに一致する過去履歴も統合（同名・別座標を落とさないよう name＋座標小数3桁丸めで重複除去）
-  const histMatches = getDiaryLocationHistory(q);
-  const merged = dedupeLocationCandidates([...histMatches, ...items]);
-  return { items: merged, sourceName };
+  const histQuery = relaxedQuery || q;
+  const histMatches = getDiaryLocationHistory(histQuery);
+  let merged = dedupeLocationCandidates([...histMatches, ...items]);
+
+  // 4. 基準点がある場合は距離を計算して近い順に並べ替え
+  if (refPoint) {
+    merged = merged.map(it => {
+      if (hasValidCoords(it)) {
+        return { ...it, dist: calcDistanceMeters(refPoint.lat, refPoint.lng, Number(it.lat), Number(it.lng)) };
+      }
+      return it;
+    }).sort((a, b) => {
+      const da = typeof a.dist === 'number' ? a.dist : Number.POSITIVE_INFINITY;
+      const db = typeof b.dist === 'number' ? b.dist : Number.POSITIVE_INFINITY;
+      return da - db;
+    });
+  }
+
+  return { items: merged, sourceName, relaxedQuery };
 }
 
 async function fetchInlineNearbyLocations(rowNum) {
@@ -396,15 +496,16 @@ async function searchInlineLocationByKeyword(rowNum) {
   if (btn) btn.disabled = true;
   if (statusEl) statusEl.textContent = `🔍 「${q}」を検索中...`;
   try {
-    const { items: merged, sourceName } = await searchLocationCandidatesByKeyword(q);
+    const { items: merged, sourceName, relaxedQuery } = await searchLocationCandidatesByKeyword(q, { referenceLocations: inlineDiaryLocations });
     if (merged.length === 0) {
       if (statusEl) statusEl.textContent = '該当する場所が見つかりませんでした（＋で自由入力追加できます）';
       renderInlineLocationCandidates(r, []);
     } else {
       const shown = renderInlineLocationCandidates(r, merged, { pin: true });
+      const relaxNote = relaxedQuery ? `店名を短くして「${relaxedQuery}」で再検索・` : '';
       if (statusEl) {
         statusEl.textContent = shown > 0
-          ? `候補 ${shown}件（履歴＋${sourceName}・タップで追加）`
+          ? `候補 ${shown}件（${relaxNote}履歴＋${sourceName}・タップで追加）`
           : `「${q}」の候補 ${merged.length}件はすべて追加済みです`;
       }
     }
@@ -581,13 +682,14 @@ function renderLocationSuggestions(items, opts = {}) {
   box.innerHTML = filtered.map((it, idx) => {
     const updateBadge = it.isCoordUpdate ? '<span class="loc-update-badge">座標を更新</span>' : '';
     const subText = formatLocationCandidateSub(it);
+    const distText = formatDistanceBadge(it.dist);
     return `
     <button type="button" class="loc-item" onclick="selectLocationCandidate(${idx})">
       <div>
         <div class="loc-item-main">${esc(it.name)}${updateBadge}</div>
         ${subText ? `<div class="loc-item-sub">${esc(subText)}</div>` : ''}
       </div>
-      ${it.dist !== undefined ? `<div class="loc-item-dist">約${it.dist}m</div>` : ''}
+      ${distText ? `<div class="loc-item-dist">${esc(distText)}</div>` : ''}
     </button>`;
   }).join('');
   box.classList.add('open');
@@ -819,14 +921,15 @@ async function searchLocationByKeyword() {
   btn.disabled = true;
   statusEl.textContent = `🔍 「${q}」を検索中...`;
   try {
-    const { items: merged, sourceName } = await searchLocationCandidatesByKeyword(q);
+    const { items: merged, sourceName, relaxedQuery } = await searchLocationCandidatesByKeyword(q, { referenceLocations: diaryLocations });
     if (merged.length === 0) {
       statusEl.textContent = '該当する場所が見つかりませんでした（そのまま自由入力で保存できます）';
       renderLocationSuggestions([]);
     } else {
       const shown = renderLocationSuggestions(merged, { scroll: true });
+      const relaxNote = relaxedQuery ? `店名を短くして「${relaxedQuery}」で再検索・` : '';
       statusEl.textContent = shown > 0
-        ? `候補 ${shown}件（履歴＋${sourceName}・タップで選択）`
+        ? `候補 ${shown}件（${relaxNote}履歴＋${sourceName}・タップで選択）`
         : `「${q}」の候補 ${merged.length}件はすべて同じ座標で追加済みです`;
     }
   } catch {

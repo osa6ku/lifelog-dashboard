@@ -256,3 +256,79 @@ test('3-46 inline and modal pickers show same-name different-coord candidates an
   assert.equal(modalLocs[0].lng, 139.3422);
   assert.ok(elements.get('loc-status').textContent.includes('座標を更新しました'));
 });
+
+test('3-47 proximity search prioritizes nearby store over distant stores using viewbox without bounded=1', async () => {
+  const requestedUrls = [];
+  const mockFetch = async (url) => {
+    requestedUrls.push(String(url));
+    return {
+      ok: true,
+      async json() {
+        // Nominatim returns distant stores first (by importance), nearby store last
+        return [
+          { name: '大戸屋', display_name: '大戸屋, 吉祥寺, 武蔵野市, 東京都, 日本', lat: '35.7033', lon: '139.5798' },
+          { name: '大戸屋', display_name: '大戸屋, 南大井, 品川区, 東京都, 日本', lat: '35.5950', lon: '139.7350' },
+          { name: '大戸屋', display_name: '大戸屋, 浅草橋, 台東区, 東京都, 日本', lat: '35.6976', lon: '139.7860' },
+        ];
+      },
+    };
+  };
+  const { ctx } = loadFrontendContext({ fetch: mockFetch });
+  // Reference point near Asakusabashi
+  const refLocs = [{ name: '浅草橋駅', lat: 35.6974, lng: 139.7866 }];
+  const { items } = await ctx.searchLocationCandidatesByKeyword('大戸屋', { referenceLocations: refLocs });
+
+  assert.equal(requestedUrls.length, 1);
+  assert.ok(requestedUrls[0].includes('viewbox='), 'Nominatim URL should include viewbox bias');
+  assert.ok(!requestedUrls[0].includes('bounded=1'), 'Nominatim URL must not restrict with bounded=1');
+  assert.equal(items.length, 3);
+  assert.ok(items[0].sub.includes('浅草橋'), 'nearest store (浅草橋) must be sorted first');
+  assert.ok(items[0].dist < items[1].dist && items[1].dist < items[2].dist);
+});
+
+test('3-47 branch-name query retries with progressively relaxed queries in both inline and modal pickers', async () => {
+  const queriedTerms = [];
+  const mockFetch = async (url) => {
+    const u = new URL(String(url));
+    const q = u.searchParams.get('q') || '';
+    queriedTerms.push(q);
+    if (q === '大戸屋') {
+      return {
+        ok: true,
+        async json() {
+          return [
+            { name: '大戸屋', display_name: '大戸屋, 吉祥寺, 武蔵野市, 東京都, 日本', lat: '35.7033', lon: '139.5798' },
+            { name: '大戸屋', display_name: '大戸屋, 浅草橋, 台東区, 東京都, 日本', lat: '35.6976', lon: '139.7860' },
+          ];
+        },
+      };
+    }
+    return { ok: true, async json() { return []; } };
+  };
+  const { ctx, elements } = loadFrontendContext({ fetch: mockFetch });
+  vm.runInContext(`
+    inlineDiaryLocations = [{ name: '浅草橋駅', lat: 35.6974, lng: 139.7866 }];
+    diaryLocations = [{ name: '浅草橋駅', lat: 35.6974, lng: 139.7866 }];
+  `, ctx);
+
+  // 1) Inline picker
+  ctx.document.getElementById('inline-loc-input-diary-88').value = '大戸屋 浅草橋店';
+  await ctx.searchInlineLocationByKeyword(88);
+
+  assert.deepEqual(queriedTerms.slice(0, 3), ['大戸屋 浅草橋店', '大戸屋 浅草橋', '大戸屋']);
+  const inlineBox = elements.get('inline-loc-suggest-diary-88');
+  const inlineStatus = elements.get('inline-loc-status-diary-88');
+  assert.equal(inlineBox.style.display, 'block');
+  assert.ok(inlineBox.innerHTML.indexOf('浅草橋') < inlineBox.innerHTML.indexOf('吉祥寺'));
+  assert.ok(inlineStatus.textContent.includes('店名を短くして「大戸屋」で再検索'));
+
+  // 2) Modal picker
+  ctx.document.getElementById('d-loc').value = '大戸屋 浅草橋店';
+  await ctx.searchLocationByKeyword();
+
+  const modalBox = elements.get('loc-suggestions');
+  const modalStatus = elements.get('loc-status');
+  assert.equal(modalBox.style.display, 'block');
+  assert.ok(modalBox.innerHTML.indexOf('浅草橋') < modalBox.innerHTML.indexOf('吉祥寺'));
+  assert.ok(modalStatus.textContent.includes('店名を短くして「大戸屋」で再検索'));
+});
