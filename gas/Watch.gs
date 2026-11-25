@@ -1,32 +1,33 @@
 function getWatchEntries() {
-  const ss = SpreadsheetApp.openById(WATCH_SS_ID);
-  const sheet = ss.getSheetByName(SHEET_NAME);
-  const values = sheet.getDataRange().getValues();
-  if (values.length < 2) return [];
+  return withSheetRetry_(() => {
+    const sheet = getSheetByNameOrThrow_(WATCH_SS_ID, SHEET_NAME);
+    const values = sheet.getDataRange().getValues();
+    if (values.length < 2) return [];
 
-  const entries = [];
-  for (let i = 1; i < values.length; i++) {
-    const r = values[i];
-    if (!r[COL.TITLE - 1] && !r[COL.NOTION_URL - 1] && !r[COL.ID - 1]) continue;
-    entries.push({
-      row: i + 1,
-      id: r[COL.ID - 1],
-      title: String(r[COL.TITLE - 1] || '(無題)'),
-      category: String(r[COL.CATEGORY - 1] || 'その他'),
-      watchDate: formatDateVal_(r[COL.WATCH_DATE - 1]),
-      status: String(r[COL.STATUS - 1] || ''),
-      rating: String(r[COL.RATING - 1] || ''),
-      platform: String(r[COL.PLATFORM - 1] || ''),
-      releaseYear: String(r[COL.RELEASE_YEAR - 1] || ''),
-      cast: String(r[COL.CAST - 1] || ''),
-      staff: String(r[COL.STAFF - 1] || ''),
-      summary: String(r[COL.SUMMARY - 1] || ''),
-      memo: String(r[COL.MEMO - 1] || ''),
-      relatedUrl: String(r[COL.RELATED_URL - 1] || ''),
-      notionUrl: String(r[COL.NOTION_URL - 1] || ''),
-    });
-  }
-  return entries.reverse();
+    const entries = [];
+    for (let i = 1; i < values.length; i++) {
+      const r = values[i];
+      if (!r[COL.TITLE - 1] && !r[COL.NOTION_URL - 1] && !r[COL.ID - 1]) continue;
+      entries.push({
+        row: i + 1,
+        id: r[COL.ID - 1],
+        title: String(r[COL.TITLE - 1] || '(無題)'),
+        category: String(r[COL.CATEGORY - 1] || 'その他'),
+        watchDate: formatDateVal_(r[COL.WATCH_DATE - 1]),
+        status: String(r[COL.STATUS - 1] || ''),
+        rating: String(r[COL.RATING - 1] || ''),
+        platform: String(r[COL.PLATFORM - 1] || ''),
+        releaseYear: String(r[COL.RELEASE_YEAR - 1] || ''),
+        cast: String(r[COL.CAST - 1] || ''),
+        staff: String(r[COL.STAFF - 1] || ''),
+        summary: String(r[COL.SUMMARY - 1] || ''),
+        memo: String(r[COL.MEMO - 1] || ''),
+        relatedUrl: String(r[COL.RELATED_URL - 1] || ''),
+        notionUrl: String(r[COL.NOTION_URL - 1] || ''),
+      });
+    }
+    return entries.reverse();
+  }, { label: 'getWatchEntries' });
 }
 
 function queryWatchEntries_(params) {
@@ -188,71 +189,78 @@ function formatWatchRow_(row, r) {
 }
 
 function updateWatchCard(payload) {
-  const ss = SpreadsheetApp.openById(WATCH_SS_ID);
-  const sheet = ss.getSheetByName(SHEET_NAME);
-  const row = resolveRowByIdOrIndex_(sheet, COL.ID, payload.row, payload.id);
-  if (row < 2) return { ok: false, error: 'Watch entry not found' };
+  const res = withSheetRetry_(() => {
+    const sheet = getSheetByNameOrThrow_(WATCH_SS_ID, SHEET_NAME);
+    const row = resolveRowByIdOrIndex_(sheet, COL.ID, payload.row, payload.id);
+    if (row < 2) return { notFound: true };
 
-  if (payload.status !== undefined) {
-    sheet.getRange(row, COL.STATUS).setValue(payload.status);
-    if (payload.status === '完了' && !sheet.getRange(row, COL.WATCH_DATE).getValue()) {
-      sheet.getRange(row, COL.WATCH_DATE).setValue(Utilities.formatDate(new Date(), 'Asia/Tokyo', 'yyyy-MM-dd'));
+    if (payload.status !== undefined) {
+      sheet.getRange(row, COL.STATUS).setValue(payload.status);
+      if (payload.status === '完了' && !sheet.getRange(row, COL.WATCH_DATE).getValue()) {
+        sheet.getRange(row, COL.WATCH_DATE).setValue(Utilities.formatDate(new Date(), 'Asia/Tokyo', 'yyyy-MM-dd'));
+      }
     }
-  }
-  if (payload.rating !== undefined) {
-    sheet.getRange(row, COL.RATING).setValue(payload.rating);
-  }
-  if (payload.memo !== undefined) {
-    sheet.getRange(row, COL.MEMO).setValue(sanitizeHtmlText_(payload.memo));
-  }
-  if (payload.cast !== undefined) {
-    sheet.getRange(row, COL.CAST).setValue(sanitizeHtmlText_(payload.cast));
-  }
-  if (payload.staff !== undefined) {
-    sheet.getRange(row, COL.STAFF).setValue(sanitizeHtmlText_(payload.staff));
-  }
+    if (payload.rating !== undefined) {
+      sheet.getRange(row, COL.RATING).setValue(payload.rating);
+    }
+    if (payload.memo !== undefined) {
+      sheet.getRange(row, COL.MEMO).setValue(sanitizeHtmlText_(payload.memo));
+    }
+    if (payload.cast !== undefined) {
+      sheet.getRange(row, COL.CAST).setValue(sanitizeHtmlText_(payload.cast));
+    }
+    if (payload.staff !== undefined) {
+      sheet.getRange(row, COL.STAFF).setValue(sanitizeHtmlText_(payload.staff));
+    }
+    return { notFound: false, sheet, row };
+  }, { label: 'updateWatchCard' });
+  if (res.notFound) return { ok: false, error: 'Watch entry not found' };
+
   if (payload.runWiki) {
-    enrichRow_(sheet, row);
+    enrichRow_(res.sheet, res.row);
   }
-  const r = sheet.getRange(row, 1, 1, 15).getValues()[0];
-  return Object.assign({ ok: true }, formatWatchRow_(row, r));
+  const r = withSheetRetry_(() => res.sheet.getRange(res.row, 1, 1, 15).getValues()[0], { label: 'updateWatchCard_read' });
+  return Object.assign({ ok: true }, formatWatchRow_(res.row, r));
 }
 
 function updateWatchFull(payload) {
-  const ss = SpreadsheetApp.openById(WATCH_SS_ID);
-  const sheet = ss.getSheetByName(SHEET_NAME);
-  const row = resolveRowByIdOrIndex_(sheet, COL.ID, payload.row, payload.id);
-  if (row < 2) return { ok: false, error: 'Watch entry not found' };
+  const res = withSheetRetry_(() => {
+    const sheet = getSheetByNameOrThrow_(WATCH_SS_ID, SHEET_NAME);
+    const row = resolveRowByIdOrIndex_(sheet, COL.ID, payload.row, payload.id);
+    if (row < 2) return { notFound: true };
 
-  const cur = sheet.getRange(row, 1, 1, 15).getValues()[0];
-  const title = payload.title !== undefined ? sanitizeHtmlText_(payload.title) : String(cur[COL.TITLE - 1] || '');
-  const memo = payload.memo !== undefined ? sanitizeHtmlText_(payload.memo) : String(cur[COL.MEMO - 1] || '');
-  const rawPlat = payload.platform !== undefined ? String(payload.platform) : String(cur[COL.PLATFORM - 1] || '');
-  const normPlat = normalizePlatforms_(rawPlat, `${title} ${memo}`);
-  const status = payload.status !== undefined ? String(payload.status) : String(cur[COL.STATUS - 1] || '');
-  let watchDate = payload.watchDate !== undefined ? String(payload.watchDate || '') : formatDateVal_(cur[COL.WATCH_DATE - 1]);
-  if (status === '完了' && !watchDate) {
-    watchDate = Utilities.formatDate(new Date(), 'Asia/Tokyo', 'yyyy-MM-dd');
-  }
+    const cur = sheet.getRange(row, 1, 1, 15).getValues()[0];
+    const title = payload.title !== undefined ? sanitizeHtmlText_(payload.title) : String(cur[COL.TITLE - 1] || '');
+    const memo = payload.memo !== undefined ? sanitizeHtmlText_(payload.memo) : String(cur[COL.MEMO - 1] || '');
+    const rawPlat = payload.platform !== undefined ? String(payload.platform) : String(cur[COL.PLATFORM - 1] || '');
+    const normPlat = normalizePlatforms_(rawPlat, `${title} ${memo}`);
+    const status = payload.status !== undefined ? String(payload.status) : String(cur[COL.STATUS - 1] || '');
+    let watchDate = payload.watchDate !== undefined ? String(payload.watchDate || '') : formatDateVal_(cur[COL.WATCH_DATE - 1]);
+    if (status === '完了' && !watchDate) {
+      watchDate = Utilities.formatDate(new Date(), 'Asia/Tokyo', 'yyyy-MM-dd');
+    }
 
-  sheet.getRange(row, COL.TITLE).setValue(title);
-  if (payload.category !== undefined) sheet.getRange(row, COL.CATEGORY).setValue(payload.category);
-  sheet.getRange(row, COL.WATCH_DATE).setValue(watchDate);
-  sheet.getRange(row, COL.STATUS).setValue(status);
-  if (payload.rating !== undefined) sheet.getRange(row, COL.RATING).setValue(payload.rating);
-  sheet.getRange(row, COL.PLATFORM).setValue(normPlat);
-  if (payload.releaseYear !== undefined) sheet.getRange(row, COL.RELEASE_YEAR).setValue(payload.releaseYear);
-  if (payload.cast !== undefined) sheet.getRange(row, COL.CAST).setValue(sanitizeHtmlText_(payload.cast));
-  if (payload.staff !== undefined) sheet.getRange(row, COL.STAFF).setValue(sanitizeHtmlText_(payload.staff));
-  if (payload.summary !== undefined) sheet.getRange(row, COL.SUMMARY).setValue(sanitizeHtmlText_(payload.summary));
-  sheet.getRange(row, COL.MEMO).setValue(memo);
-  if (payload.relatedUrl !== undefined) sheet.getRange(row, COL.RELATED_URL).setValue(payload.relatedUrl);
+    sheet.getRange(row, COL.TITLE).setValue(title);
+    if (payload.category !== undefined) sheet.getRange(row, COL.CATEGORY).setValue(payload.category);
+    sheet.getRange(row, COL.WATCH_DATE).setValue(watchDate);
+    sheet.getRange(row, COL.STATUS).setValue(status);
+    if (payload.rating !== undefined) sheet.getRange(row, COL.RATING).setValue(payload.rating);
+    sheet.getRange(row, COL.PLATFORM).setValue(normPlat);
+    if (payload.releaseYear !== undefined) sheet.getRange(row, COL.RELEASE_YEAR).setValue(payload.releaseYear);
+    if (payload.cast !== undefined) sheet.getRange(row, COL.CAST).setValue(sanitizeHtmlText_(payload.cast));
+    if (payload.staff !== undefined) sheet.getRange(row, COL.STAFF).setValue(sanitizeHtmlText_(payload.staff));
+    if (payload.summary !== undefined) sheet.getRange(row, COL.SUMMARY).setValue(sanitizeHtmlText_(payload.summary));
+    sheet.getRange(row, COL.MEMO).setValue(memo);
+    if (payload.relatedUrl !== undefined) sheet.getRange(row, COL.RELATED_URL).setValue(payload.relatedUrl);
+    return { notFound: false, sheet, row };
+  }, { label: 'updateWatchFull' });
+  if (res.notFound) return { ok: false, error: 'Watch entry not found' };
 
   if (payload.runWiki) {
-    enrichRow_(sheet, row);
+    enrichRow_(res.sheet, res.row);
   }
-  const r = sheet.getRange(row, 1, 1, 15).getValues()[0];
-  return { ok: true, entry: formatWatchRow_(row, r) };
+  const r = withSheetRetry_(() => res.sheet.getRange(res.row, 1, 1, 15).getValues()[0], { label: 'updateWatchFull_read' });
+  return { ok: true, entry: formatWatchRow_(res.row, r) };
 }
 
 function deleteWatchEntry(payload) {

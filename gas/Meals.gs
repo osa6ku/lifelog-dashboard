@@ -231,25 +231,27 @@ function formatMealRow_(row, r, colMap) {
 }
 
 function getMealEntries() {
-  const ss = SpreadsheetApp.openById(DIARY_SS_ID);
-  const sheet = ss.getSheetByName(MEAL_SHEET_NAME);
-  if (!sheet) return [];
-  const lastRow = sheet.getLastRow();
-  if (lastRow < 2) return [];
-  const { map, totalCols } = getMealColMap_(sheet);
-  const values = sheet.getRange(2, 1, lastRow - 1, totalCols).getValues();
-  const out = [];
-  for (let i = 0; i < values.length; i++) {
-    const r = values[i];
-    if (!r[map['日付'] !== undefined ? map['日付'] : 1] && !r[map['料理名'] !== undefined ? map['料理名'] : 3]) continue;
-    out.push(formatMealRow_(i + 2, r, map));
-  }
-  // 日付降順、同一日内は 朝食→昼食→夕食→間食
-  out.sort((a, b) => {
-    if (a.date !== b.date) return b.date.localeCompare(a.date);
-    return (MEAL_ORDER[a.mealType] || 9) - (MEAL_ORDER[b.mealType] || 9) || Number(a.id) - Number(b.id);
-  });
-  return out;
+  return withSheetRetry_(() => {
+    const ss = SpreadsheetApp.openById(DIARY_SS_ID);
+    const sheet = ss.getSheetByName(MEAL_SHEET_NAME);
+    if (!sheet) return [];
+    const lastRow = sheet.getLastRow();
+    if (lastRow < 2) return [];
+    const { map, totalCols } = getMealColMap_(sheet);
+    const values = sheet.getRange(2, 1, lastRow - 1, totalCols).getValues();
+    const out = [];
+    for (let i = 0; i < values.length; i++) {
+      const r = values[i];
+      if (!r[map['日付'] !== undefined ? map['日付'] : 1] && !r[map['料理名'] !== undefined ? map['料理名'] : 3]) continue;
+      out.push(formatMealRow_(i + 2, r, map));
+    }
+    // 日付降順、同一日内は 朝食→昼食→夕食→間食
+    out.sort((a, b) => {
+      if (a.date !== b.date) return b.date.localeCompare(a.date);
+      return (MEAL_ORDER[a.mealType] || 9) - (MEAL_ORDER[b.mealType] || 9) || Number(a.id) - Number(b.id);
+    });
+    return out;
+  }, { label: 'getMealEntries' });
 }
 
 function resolveSaltPayload_(payload) {
@@ -329,39 +331,41 @@ function addMealEntry(payload) {
 }
 
 function updateMealEntry(payload) {
-  const sheet = ensureMealSheet_();
-  const { map, totalCols } = getMealColMap_(sheet);
-  const idCol = (map['ID'] !== undefined ? map['ID'] : 0) + 1;
-  const row = resolveRowByIdOrIndex_(sheet, idCol, payload.row, payload.id);
-  if (row < 2) return { ok: false, error: 'Meal entry not found' };
+  return withSheetRetry_(() => {
+    const sheet = ensureMealSheet_();
+    const { map, totalCols } = getMealColMap_(sheet);
+    const idCol = (map['ID'] !== undefined ? map['ID'] : 0) + 1;
+    const row = resolveRowByIdOrIndex_(sheet, idCol, payload.row, payload.id);
+    if (row < 2) return { ok: false, error: 'Meal entry not found' };
 
-  const cur = sheet.getRange(row, 1, 1, totalCols).getValues()[0];
-  const prev = formatMealRow_(row, cur, map);
-  const dateStr = payload.date ? String(payload.date).slice(0, 10) : prev.date;
-  const mealType = payload.mealType !== undefined ? String(payload.mealType).trim() : prev.mealType;
-  const dishName = payload.dishName !== undefined ? String(payload.dishName).trim() : prev.dishName;
+    const cur = sheet.getRange(row, 1, 1, totalCols).getValues()[0];
+    const prev = formatMealRow_(row, cur, map);
+    const dateStr = payload.date ? String(payload.date).slice(0, 10) : prev.date;
+    const mealType = payload.mealType !== undefined ? String(payload.mealType).trim() : prev.mealType;
+    const dishName = payload.dishName !== undefined ? String(payload.dishName).trim() : prev.dishName;
 
-  const rowArr = buildMealRowByMap_(map, totalCols, {
-    id: prev.id,
-    date: dateStr,
-    mealType,
-    dishName,
-    photoUrls: '',
-    photoIds: '',
-    calories: payload.calories !== undefined ? numOrEmpty_(payload.calories) : prev.calories,
-    protein: payload.protein !== undefined ? numOrEmpty_(payload.protein) : prev.protein,
-    fat: payload.fat !== undefined ? numOrEmpty_(payload.fat) : prev.fat,
-    carbs: payload.carbs !== undefined ? numOrEmpty_(payload.carbs) : prev.carbs,
-    sugar: (payload.sugar !== undefined || payload.availableCarbs !== undefined || payload.carbsAvailable !== undefined) ? resolveSugarPayload_(payload) : prev.sugar,
-    fiber: (payload.fiber !== undefined || payload.dietaryFiber !== undefined) ? resolveFiberPayload_(payload) : prev.fiber,
-    salt: (payload.salt !== undefined || payload.sodium !== undefined) ? resolveSaltPayload_(payload) : prev.salt,
-    memo: payload.memo !== undefined ? String(payload.memo).trim() : prev.memo,
-    source: prev.source,
-  });
+    const rowArr = buildMealRowByMap_(map, totalCols, {
+      id: prev.id,
+      date: dateStr,
+      mealType,
+      dishName,
+      photoUrls: '',
+      photoIds: '',
+      calories: payload.calories !== undefined ? numOrEmpty_(payload.calories) : prev.calories,
+      protein: payload.protein !== undefined ? numOrEmpty_(payload.protein) : prev.protein,
+      fat: payload.fat !== undefined ? numOrEmpty_(payload.fat) : prev.fat,
+      carbs: payload.carbs !== undefined ? numOrEmpty_(payload.carbs) : prev.carbs,
+      sugar: (payload.sugar !== undefined || payload.availableCarbs !== undefined || payload.carbsAvailable !== undefined) ? resolveSugarPayload_(payload) : prev.sugar,
+      fiber: (payload.fiber !== undefined || payload.dietaryFiber !== undefined) ? resolveFiberPayload_(payload) : prev.fiber,
+      salt: (payload.salt !== undefined || payload.sodium !== undefined) ? resolveSaltPayload_(payload) : prev.salt,
+      memo: payload.memo !== undefined ? String(payload.memo).trim() : prev.memo,
+      source: prev.source,
+    });
 
-  sheet.getRange(row, 1, 1, totalCols).setValues([rowArr]);
-  const r = sheet.getRange(row, 1, 1, totalCols).getValues()[0];
-  return { ok: true, entry: formatMealRow_(row, r, map) };
+    sheet.getRange(row, 1, 1, totalCols).setValues([sanitizeRowForSetValues_(rowArr)]);
+    const r = sheet.getRange(row, 1, 1, totalCols).getValues()[0];
+    return { ok: true, entry: formatMealRow_(row, r, map) };
+  }, { label: 'updateMealEntry' });
 }
 
 function deleteMealEntry(payload) {

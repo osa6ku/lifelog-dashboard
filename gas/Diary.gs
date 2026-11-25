@@ -192,39 +192,42 @@ function formatDiaryRow_(row, r, cols) {
 }
 
 function getLocationPresets() {
-  const ss = SpreadsheetApp.openById(DIARY_SS_ID);
-  const sheet = ss.getSheetByName(LOCATION_PRESET_SHEET_NAME);
-  if (!sheet) return [];
-  const lastRow = sheet.getLastRow();
-  if (lastRow < 2) return [];
-  const values = sheet.getRange(2, 1, lastRow - 1, Math.min(4, Math.max(4, sheet.getLastColumn()))).getValues();
-  const out = [];
-  for (let i = 0; i < values.length; i++) {
-    const r = values[i];
-    const name = String(r[0] || '').trim();
-    if (!name) continue;
-    const icon = String(r[1] || '📍').trim() || '📍';
-    const lat = isFiniteCoord_(r[2]) ? Number(r[2]) : null;
-    const lng = isFiniteCoord_(r[3]) ? Number(r[3]) : null;
-    out.push({ name, icon, lat, lng });
-  }
-  return out;
+  return withSheetRetry_(() => {
+    const ss = SpreadsheetApp.openById(DIARY_SS_ID);
+    const sheet = ss.getSheetByName(LOCATION_PRESET_SHEET_NAME);
+    if (!sheet) return [];
+    const lastRow = sheet.getLastRow();
+    if (lastRow < 2) return [];
+    const values = sheet.getRange(2, 1, lastRow - 1, Math.min(4, Math.max(4, sheet.getLastColumn()))).getValues();
+    const out = [];
+    for (let i = 0; i < values.length; i++) {
+      const r = values[i];
+      const name = String(r[0] || '').trim();
+      if (!name) continue;
+      const icon = String(r[1] || '📍').trim() || '📍';
+      const lat = isFiniteCoord_(r[2]) ? Number(r[2]) : null;
+      const lng = isFiniteCoord_(r[3]) ? Number(r[3]) : null;
+      out.push({ name, icon, lat, lng });
+    }
+    return out;
+  }, { label: 'getLocationPresets' });
 }
 
 function getDiaryEntries(limit) {
-  const ss = SpreadsheetApp.openById(DIARY_SS_ID);
-  const sheet = ss.getSheetByName(DIARY_SHEET_NAME);
-  const lastRow = sheet.getLastRow();
-  if (lastRow < 2) return [];
+  return withSheetRetry_(() => {
+    const sheet = getSheetByNameOrThrow_(DIARY_SS_ID, DIARY_SHEET_NAME);
+    const lastRow = sheet.getLastRow();
+    if (lastRow < 2) return [];
 
-  const cols = getDiaryNutritionCols_(sheet, false);
-  const startRow = limit && limit > 0 ? Math.max(2, lastRow - limit + 1) : 2;
-  const values = sheet.getRange(startRow, 1, lastRow - startRow + 1, cols.totalCols).getValues();
-  const out = [];
-  for (let i = values.length - 1; i >= 0; i--) {
-    out.push(formatDiaryRow_(startRow + i, values[i], cols));
-  }
-  return out;
+    const cols = getDiaryNutritionCols_(sheet, false);
+    const startRow = limit && limit > 0 ? Math.max(2, lastRow - limit + 1) : 2;
+    const values = sheet.getRange(startRow, 1, lastRow - startRow + 1, cols.totalCols).getValues();
+    const out = [];
+    for (let i = values.length - 1; i >= 0; i--) {
+      out.push(formatDiaryRow_(startRow + i, values[i], cols));
+    }
+    return out;
+  }, { label: 'getDiaryEntries' });
 }
 
 function getImageDataUrl_(fileId, full) {
@@ -420,63 +423,88 @@ function applyDiaryExtraToArray_(rowArr, cols, payload, normLocs) {
 }
 
 function updateDiaryEntry(payload) {
-  const ss = SpreadsheetApp.openById(DIARY_SS_ID);
-  const sheet = ss.getSheetByName(DIARY_SHEET_NAME);
-  const row = resolveRowByIdOrIndex_(sheet, 1, payload.row, payload.id);
-  if (row < 2) return { ok: false, error: 'Diary entry not found' };
-
-  // ヘッダー行(1行目)と対象行(row行目)の2行のみを取得して O(1) 更新
-  const cols = getDiaryNutritionCols_(sheet, true);
-  const rowArr = sheet.getRange(row, 1, 1, cols.totalCols).getValues()[0];
-  const oldDate = formatDateVal_(rowArr[1]);
-  const oldTitle = String(rowArr[4] || '');
-  const oldBody = String(rowArr[5] || '').trim();
-  const oldLocation = String(rowArr[6] || '').trim();
-
-  const dateStr = payload.date ? String(payload.date).slice(0, 10) : oldDate;
-  const weekday = getWeekdayJa_(dateStr);
-  const title = payload.title !== undefined ? sanitizeHtmlText_(payload.title) : oldTitle;
-  const body = payload.body !== undefined ? sanitizeHtmlText_(payload.body) : String(rowArr[5] || '');
-  const normLocs = payload.locations !== undefined ? normalizeLocationsPayload_(payload.location, payload.locations) : null;
-  const location = normLocs
-    ? normLocs.map(l => l.name).join('\n')
-    : (payload.location !== undefined ? String(payload.location).trim() : String(rowArr[6] || ''));
-
-  rowArr[1] = dateStr;
-  rowArr[2] = weekday;
-  rowArr[4] = title;
-  rowArr[5] = body;
-  rowArr[6] = location;
-
-  // 既存写真の削除＋新規写真の追加（メモリ上の rowArr へ反映）
+  // 新規写真のDriveアップロードはリトライ対象外（1回だけ実行して重複アップロードを防止）
+  const initialDateHint = payload.date ? String(payload.date).slice(0, 10) : Utilities.formatDate(new Date(), 'Asia/Tokyo', 'yyyy-MM-dd');
   const removeSet = new Set((payload.removeUrls || []).map(String));
-  const added = saveDiaryPhotos_(dateStr, payload.photos || []);
-  if (removeSet.size > 0 || added.jpgNames.length > 0) {
-    const prevNames = String(rowArr[8] || '').split('\n').filter(Boolean);
-    const prevUrls = String(rowArr[9] || '').split('\n').filter(Boolean);
-    const keptNames = [];
-    const keptUrls = [];
-    prevUrls.forEach((u, idx) => {
-      if (!removeSet.has(u)) {
-        keptUrls.push(u);
-        keptNames.push(prevNames[idx] || `photo_${idx + 1}.jpg`);
+  const hasNewPhotos = Array.isArray(payload.photos) && payload.photos.length > 0;
+  let uploadedPhotos = null;
+
+  const outcome = withSheetRetry_(() => {
+    const sheet = getSheetByNameOrThrow_(DIARY_SS_ID, DIARY_SHEET_NAME);
+    const row = resolveRowByIdOrIndex_(sheet, 1, payload.row, payload.id);
+    if (row < 2) return { notFound: true };
+
+    // ヘッダー行(1行目)と対象行(row行目)の2行のみを取得して O(1) 更新
+    const cols = getDiaryNutritionCols_(sheet, true);
+    const rowArr = sheet.getRange(row, 1, 1, cols.totalCols).getValues()[0];
+    const oldDate = formatDateVal_(rowArr[1]);
+    const oldTitle = String(rowArr[4] || '');
+    const oldBody = String(rowArr[5] || '').trim();
+    const oldLocation = String(rowArr[6] || '').trim();
+
+    const dateStr = payload.date ? String(payload.date).slice(0, 10) : (oldDate || initialDateHint);
+    const weekday = getWeekdayJa_(dateStr);
+    const title = payload.title !== undefined ? sanitizeHtmlText_(payload.title) : oldTitle;
+    const body = payload.body !== undefined ? sanitizeHtmlText_(payload.body) : String(rowArr[5] || '');
+    const normLocs = payload.locations !== undefined ? normalizeLocationsPayload_(payload.location, payload.locations) : null;
+    const location = normLocs
+      ? normLocs.map(l => l.name).join('\n')
+      : (payload.location !== undefined ? String(payload.location).trim() : String(rowArr[6] || ''));
+
+    rowArr[1] = dateStr;
+    rowArr[2] = weekday;
+    rowArr[4] = title;
+    rowArr[5] = body;
+    rowArr[6] = location;
+
+    // 既存写真の削除＋新規写真の追加（Driveアップロードは初回のみ実行）
+    if (!uploadedPhotos) {
+      uploadedPhotos = hasNewPhotos
+        ? saveDiaryPhotos_(dateStr, payload.photos || [])
+        : { jpgNames: [], driveUrls: [], firstFileId: '', failedPhotos: [] };
+    }
+    const photosChanged = removeSet.size > 0 || uploadedPhotos.jpgNames.length > 0;
+    if (photosChanged) {
+      const prevNames = String(rowArr[8] || '').split('\n').filter(Boolean);
+      const prevUrls = String(rowArr[9] || '').split('\n').filter(Boolean);
+      const keptNames = [];
+      const keptUrls = [];
+      prevUrls.forEach((u, idx) => {
+        if (!removeSet.has(u)) {
+          keptUrls.push(u);
+          keptNames.push(prevNames[idx] || `photo_${idx + 1}.jpg`);
+        }
+      });
+      const allNames = [...uploadedPhotos.jpgNames, ...keptNames];
+      const allUrls = [...uploadedPhotos.driveUrls, ...keptUrls];
+      const firstIdMatch = (allUrls[0] || '').match(/\/d\/([^/]+)/);
+      rowArr[7] = allNames.length;
+      rowArr[8] = allNames.join('\n');
+      rowArr[9] = allUrls.join('\n');
+      rowArr[10] = firstIdMatch ? `=IMAGE("https://drive.google.com/uc?export=view&id=${firstIdMatch[1]}")` : '';
+    }
+
+    applyDiaryExtraToArray_(rowArr, cols, payload, normLocs);
+    rowArr[12] = `edited ${Utilities.formatDate(new Date(), 'Asia/Tokyo', 'yyyy-MM-dd HH:mm')}`;
+
+    // 根本対策: K列(11列目)の =IMAGE() セルは getValues() で CellImage オブジェクトとして返り、
+    // そのまま setValues() へ書き戻すと「Exception: サービス エラー: スプレッドシート」が発生する。
+    // 写真変更がない場合は K列を書き戻さず A〜J列 と L列以降を分割更新し、さらに全要素から非Dateオブジェクトを除去する。
+    if (photosChanged) {
+      sheet.getRange(row, 1, 1, cols.totalCols).setValues([sanitizeRowForSetValues_(rowArr)]);
+    } else {
+      sheet.getRange(row, 1, 1, 10).setValues([sanitizeRowForSetValues_(rowArr.slice(0, 10))]);
+      if (cols.totalCols >= 12) {
+        sheet.getRange(row, 12, 1, cols.totalCols - 11).setValues([sanitizeRowForSetValues_(rowArr.slice(11))]);
       }
-    });
-    const allNames = [...added.jpgNames, ...keptNames];
-    const allUrls = [...added.driveUrls, ...keptUrls];
-    const firstIdMatch = (allUrls[0] || '').match(/\/d\/([^/]+)/);
-    rowArr[7] = allNames.length;
-    rowArr[8] = allNames.join('\n');
-    rowArr[9] = allUrls.join('\n');
-    rowArr[10] = firstIdMatch ? `=IMAGE("https://drive.google.com/uc?export=view&id=${firstIdMatch[1]}")` : '';
-  }
+    }
 
-  applyDiaryExtraToArray_(rowArr, cols, payload, normLocs);
-  rowArr[12] = `edited ${Utilities.formatDate(new Date(), 'Asia/Tokyo', 'yyyy-MM-dd HH:mm')}`;
+    return { notFound: false, row, rowArr, cols, dateStr, oldDate, title, oldTitle, body, oldBody, location, oldLocation };
+  }, { label: 'updateDiaryEntry' });
 
-  // シート1行一括書き込み（setValues 1回のみ）
-  sheet.getRange(row, 1, 1, cols.totalCols).setValues([rowArr]);
+  if (outcome.notFound) return { ok: false, error: 'Diary entry not found' };
 
+  const { row, rowArr, cols, dateStr, oldDate, title, oldTitle, body, oldBody, location, oldLocation } = outcome;
   // 年別Doc同期は深夜バッチへ委譲（対象年をマークするのみ）
   const newYear = String(dateStr || '').slice(0, 4);
   const oldYear = String(oldDate || '').slice(0, 4);
