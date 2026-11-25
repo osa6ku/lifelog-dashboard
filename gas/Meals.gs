@@ -154,8 +154,9 @@ function analyzeMealEntry(payload) {
         nutritionAdvice: result.advice,
       });
       const cols = getDiaryNutritionCols_(sheet, false);
+      const ssTimeZone = typeof ss.getSpreadsheetTimeZone === 'function' ? ss.getSpreadsheetTimeZone() : getSpreadsheetTimeZoneSafe_(sheet);
       const updated = sheet.getRange(row, 1, 1, cols.totalCols).getValues()[0];
-      updatedEntry = formatDiaryRow_(row, updated, cols);
+      updatedEntry = formatDiaryRow_(row, updated, cols, ssTimeZone);
     }
   }
 
@@ -499,7 +500,9 @@ function migrateMealPhotosToDiary() {
       const year = dateStr.slice(0, 4);
       const docId = YEAR_DOC_IDS[year] || '';
       const docUrl = docId ? `https://docs.google.com/document/d/${docId}/edit` : '';
-      diarySheet.appendRow([
+      const newDiaryRow = dLast + 1;
+      setPlainTextFormatSafe_(diarySheet, newDiaryRow, 4);
+      diarySheet.getRange(newDiaryRow, 1, 1, 13).setValues([[
         nextId,
         dateStr,
         weekday,
@@ -513,8 +516,8 @@ function migrateMealPhotosToDiary() {
         formula,
         docUrl,
         'meal_photo_archive',
-      ]);
-      diaryRow = diarySheet.getLastRow();
+      ]]);
+      diaryRow = newDiaryRow;
       if (docId) {
         try {
           const doc = DocumentApp.openById(docId);

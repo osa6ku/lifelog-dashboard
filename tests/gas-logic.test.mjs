@@ -305,3 +305,115 @@ test('3-53 GAS buildYearCounts_ aggregates counts per year in descending order',
     { year: 2012, count: 1 },
   ]);
 });
+
+test('3-56 GAS diary time avoids +9h shift/drift on Etc/GMT spreadsheet via plain-text @ format and spreadsheet TZ', () => {
+  const headers = [
+    'ID', '日付', '曜日', '時刻', 'タイトル', '本文', '場所',
+    '写真枚数', '写真ファイル名', '写真URL', 'サムネイル(IMAGE)', '年別Doc URL', 'データソース',
+    '食事区分', '推定カロリー(kcal)', '栄養バランス(PFC・所見)', '位置情報JSON',
+  ];
+  // Legacy Date cell representing 16:11 in Etc/GMT spreadsheet
+  const legacyUtcTime = new Date(Date.UTC(1899, 11, 30, 16, 11, 0));
+  const grid = [
+    headers.slice(),
+    [2575, '2026-11-24', '火', legacyUtcTime, '出社', '元の本文', '', 0, '', '', '', '', 'webapp_entry', '', '', '', ''],
+  ];
+  const formats = new Map(); // "r:c" -> numberFormat
+
+  const mockParent = {
+    getSpreadsheetTimeZone: () => 'Etc/GMT',
+    getSheetByName: (name) => (name === '日記DB' ? mockSheet : null),
+  };
+  const mockSheet = {
+    getParent: () => mockParent,
+    getLastRow: () => grid.length,
+    getLastColumn: () => headers.length,
+    getRange(row, col, numRows = 1, numCols = 1) {
+      return {
+        setNumberFormat(fmt) {
+          for (let r = 0; r < numRows; r++) {
+            for (let c = 0; c < numCols; c++) formats.set(`${row + r}:${col + c}`, fmt);
+          }
+        },
+        getValue: () => (grid[row - 1] ? grid[row - 1][col - 1] : ''),
+        getValues: () => {
+          const out = [];
+          for (let r = 0; r < numRows; r++) {
+            const rowData = grid[row - 1 + r] || new Array(headers.length).fill('');
+            out.push(rowData.slice(col - 1, col - 1 + numCols));
+          }
+          return out;
+        },
+        setValue(val) {
+          while (grid.length < row) grid.push(new Array(headers.length).fill(''));
+          grid[row - 1][col - 1] = val;
+        },
+        setValues(vals) {
+          for (let r = 0; r < numRows; r++) {
+            const targetRow = row + r;
+            while (grid.length < targetRow) grid.push(new Array(headers.length).fill(''));
+            for (let c = 0; c < numCols; c++) {
+              const targetCol = col + c;
+              let v = vals[r][c];
+              // Simulate Google Sheets auto-converting HH:mm into UTC Date when cell is NOT plain-text '@'
+              if (targetCol === 4 && typeof v === 'string' && /^\d{1,2}:\d{2}$/.test(v) && formats.get(`${targetRow}:4`) !== '@') {
+                const [hh, mm] = v.split(':').map(Number);
+                v = new Date(Date.UTC(1899, 11, 30, hh, mm, 0));
+              }
+              grid[targetRow - 1][targetCol - 1] = v;
+            }
+          }
+        },
+      };
+    },
+  };
+
+  const formatDateTz = (date, tz, pattern) => {
+    const offsetMin = tz === 'Asia/Tokyo' ? 9 * 60 : 0;
+    const d = new Date(date.getTime() + offsetMin * 60000);
+    const yyyy = d.getUTCFullYear();
+    const MM = String(d.getUTCMonth() + 1).padStart(2, '0');
+    const dd = String(d.getUTCDate()).padStart(2, '0');
+    const HH = String(d.getUTCHours()).padStart(2, '0');
+    const mm = String(d.getUTCMinutes()).padStart(2, '0');
+    if (pattern === 'HH:mm') return `${HH}:${mm}`;
+    if (pattern === 'yyyy-MM-dd') return `${yyyy}-${MM}-${dd}`;
+    return `${yyyy}-${MM}-${dd} ${HH}:${mm}`;
+  };
+
+  const { ctx } = loadGasContext({
+    extraGlobals: {
+      SpreadsheetApp: { openById: () => mockParent },
+      Utilities: { formatDate: formatDateTz, sleep: () => {} },
+    },
+  });
+
+  // 1. Legacy Date cell in Etc/GMT sheet reads as '16:11' (NOT +9h '01:11')
+  const initialEntries = ctx.getDiaryEntries(0);
+  assert.equal(initialEntries[0].time, '16:11');
+
+  // 2. Consecutive 3x updateDiaryEntry roundtrips never drift from '16:11'
+  for (let i = 1; i <= 3; i++) {
+    const readTime = ctx.getDiaryEntries(0).find(e => e.id === 2575).time;
+    assert.equal(readTime, '16:11');
+    const upd = ctx.updateDiaryEntry({ row: 2, id: 2575, time: readTime, body: `更新${i}` });
+    assert.equal(upd.ok, true);
+    assert.equal(upd.entry.time, '16:11');
+    assert.equal(formats.get('2:4'), '@');
+    assert.equal(typeof grid[1][3], 'string');
+    assert.equal(grid[1][3], '16:11');
+  }
+
+  // 3. New diary (3-52 auto-fill and explicit time) saves as plain-text '@' without drift
+  const created = ctx.addDiaryEntry({ date: '2026-11-25', time: '07:36', title: '朝', body: '新規' });
+  assert.equal(created.ok, true);
+  assert.equal(created.entry.time, '07:36');
+  assert.equal(formats.get(`${created.row}:4`), '@');
+  assert.equal(grid[created.row - 1][3], '07:36');
+
+  // 4. Explicit empty string "" is preserved as ""
+  const emptyTime = ctx.addDiaryEntry({ date: '2026-11-25', time: '', title: '空時刻', body: '本文2' });
+  assert.equal(emptyTime.ok, true);
+  assert.equal(emptyTime.entry.time, '');
+  assert.equal(grid[emptyTime.row - 1][3], '');
+});

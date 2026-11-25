@@ -155,7 +155,7 @@ function formatNutritionStr_(p, f, c, advice) {
   return adv;
 }
 
-function formatDiaryRow_(row, r, cols) {
+function formatDiaryRow_(row, r, cols, ssTimeZone) {
   const imageUrls = String(r[9] || '').split('\n').filter(Boolean);
   const imageIds = imageUrls.map(u => {
     const m = u.match(/\/d\/([^/]+)/);
@@ -175,7 +175,7 @@ function formatDiaryRow_(row, r, cols) {
     id: r[0],
     date: formatDateVal_(r[1]),
     weekday: String(r[2] || ''),
-    time: formatTimeVal_(r[3]),
+    time: formatTimeVal_(r[3], ssTimeZone),
     title: String(r[4] || ''),
     body: String(r[5] || ''),
     location: locText,
@@ -218,6 +218,7 @@ function getLocationPresets() {
 function getDiaryEntries(limit) {
   return withSheetRetry_(() => {
     const sheet = getSheetByNameOrThrow_(DIARY_SS_ID, DIARY_SHEET_NAME);
+    const ssTimeZone = getSpreadsheetTimeZoneSafe_(sheet);
     const lastRow = sheet.getLastRow();
     if (lastRow < 2) return [];
 
@@ -226,7 +227,7 @@ function getDiaryEntries(limit) {
     const values = sheet.getRange(startRow, 1, lastRow - startRow + 1, cols.totalCols).getValues();
     const out = [];
     for (let i = values.length - 1; i >= 0; i--) {
-      out.push(formatDiaryRow_(startRow + i, values[i], cols));
+      out.push(formatDiaryRow_(startRow + i, values[i], cols, ssTimeZone));
     }
     return out;
   }, { label: 'getDiaryEntries' });
@@ -330,6 +331,7 @@ function addDiaryEntry(payload) {
 
   const ss = SpreadsheetApp.openById(DIARY_SS_ID);
   const sheet = ss.getSheetByName(DIARY_SHEET_NAME);
+  const ssTimeZone = typeof ss.getSpreadsheetTimeZone === 'function' ? ss.getSpreadsheetTimeZone() : getSpreadsheetTimeZoneSafe_(sheet);
   const lastRow = sheet.getLastRow();
 
   // 重複登録防止（冪等性：直近30行に同一の日付・タイトル・本文があればスキップ）
@@ -349,7 +351,7 @@ function addDiaryEntry(payload) {
           row: dupRow,
           date: dateStr,
           needsDocSync: false,
-          entry: formatDiaryRow_(dupRow, dupFull, dupCols),
+          entry: formatDiaryRow_(dupRow, dupFull, dupCols, ssTimeZone),
         };
       }
     }
@@ -382,6 +384,8 @@ function addDiaryEntry(payload) {
   applyDiaryExtraToArray_(rowArr, cols, payload, normLocs);
 
   const insertedRow = lastRow + 1;
+  // D列（時刻）は Date シリアル値への自動変換による TZ ズレを防ぐためプレーンテキスト書式（@）で保存（3-56）
+  setPlainTextFormatSafe_(sheet, insertedRow, 4);
   sheet.getRange(insertedRow, 1, 1, cols.totalCols).setValues([rowArr]);
 
   // 年別Doc同期はリアルタイム実行を廃止し、深夜バッチ同期対象として年をマーク
@@ -396,7 +400,7 @@ function addDiaryEntry(payload) {
     needsDocSync: false,
     docSyncPayload: null,
     failedPhotos,
-    entry: formatDiaryRow_(insertedRow, rowArr, cols),
+    entry: formatDiaryRow_(insertedRow, rowArr, cols, ssTimeZone),
   };
   if (clientReqId) {
     try {
@@ -433,6 +437,7 @@ function updateDiaryEntry(payload) {
 
   const outcome = withSheetRetry_(() => {
     const sheet = getSheetByNameOrThrow_(DIARY_SS_ID, DIARY_SHEET_NAME);
+    const ssTimeZone = getSpreadsheetTimeZoneSafe_(sheet);
     const row = resolveRowByIdOrIndex_(sheet, 1, payload.row, payload.id);
     if (row < 2) return { notFound: true };
 
@@ -455,8 +460,11 @@ function updateDiaryEntry(payload) {
 
     rowArr[1] = dateStr;
     rowArr[2] = weekday;
+    // D列（時刻）は既存Date型も含めシート自身のTZ基準のプレーンテキスト HH:MM へ正規化して保存（3-56）
     if (payload.time !== undefined) {
-      rowArr[3] = payload.time === null ? '' : formatTimeVal_(payload.time);
+      rowArr[3] = payload.time === null ? '' : formatTimeVal_(payload.time, ssTimeZone);
+    } else {
+      rowArr[3] = formatTimeVal_(rowArr[3], ssTimeZone);
     }
     rowArr[4] = title;
     rowArr[5] = body;
@@ -495,6 +503,8 @@ function updateDiaryEntry(payload) {
     // 根本対策: K列(11列目)の =IMAGE() セルは getValues() で CellImage オブジェクトとして返り、
     // そのまま setValues() へ書き戻すと「Exception: サービス エラー: スプレッドシート」が発生する。
     // 写真変更がない場合は K列を書き戻さず A〜J列 と L列以降を分割更新し、さらに全要素から非Dateオブジェクトを除去する。
+    // また D列（時刻）は Date シリアル値への自動変換を防ぐためプレーンテキスト書式（@）を設定してから書き込む（3-56）。
+    setPlainTextFormatSafe_(sheet, row, 4);
     if (photosChanged) {
       sheet.getRange(row, 1, 1, cols.totalCols).setValues([sanitizeRowForSetValues_(rowArr)]);
     } else {
@@ -504,12 +514,12 @@ function updateDiaryEntry(payload) {
       }
     }
 
-    return { notFound: false, row, rowArr, cols, dateStr, oldDate, title, oldTitle, body, oldBody, location, oldLocation };
+    return { notFound: false, row, rowArr, cols, ssTimeZone, dateStr, oldDate, title, oldTitle, body, oldBody, location, oldLocation };
   }, { label: 'updateDiaryEntry' });
 
   if (outcome.notFound) return { ok: false, error: 'Diary entry not found' };
 
-  const { row, rowArr, cols, dateStr, oldDate, title, oldTitle, body, oldBody, location, oldLocation } = outcome;
+  const { row, rowArr, cols, ssTimeZone, dateStr, oldDate, title, oldTitle, body, oldBody, location, oldLocation } = outcome;
   // 年別Doc同期は深夜バッチへ委譲（対象年をマークするのみ）
   const newYear = String(dateStr || '').slice(0, 4);
   const oldYear = String(oldDate || '').slice(0, 4);
@@ -525,7 +535,7 @@ function updateDiaryEntry(payload) {
     docSyncSkipped: !docContentChanged,
     needsDocSync: false,
     docSyncPayload: null,
-    entry: formatDiaryRow_(row, rowArr, cols),
+    entry: formatDiaryRow_(row, rowArr, cols, ssTimeZone),
   };
 }
 

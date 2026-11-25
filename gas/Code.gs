@@ -209,10 +209,11 @@ function formatDateVal_(val) {
   return String(val).slice(0, 10);
 }
 
-function formatTimeVal_(val) {
+function formatTimeVal_(val, timeZone) {
   if (val === null || val === undefined || val === '') return '';
   if (val instanceof Date) {
-    return Utilities.formatDate(val, 'Asia/Tokyo', 'HH:mm');
+    const tz = timeZone || 'Asia/Tokyo';
+    return Utilities.formatDate(val, tz, 'HH:mm');
   }
   const s = String(val).trim();
   if (!s) return '';
@@ -221,6 +222,26 @@ function formatTimeVal_(val) {
     return `${m[1].padStart(2, '0')}:${m[2]}`;
   }
   return s;
+}
+
+function getSpreadsheetTimeZoneSafe_(sheet) {
+  try {
+    const parent = sheet && typeof sheet.getParent === 'function' ? sheet.getParent() : null;
+    if (parent && typeof parent.getSpreadsheetTimeZone === 'function') {
+      const tz = parent.getSpreadsheetTimeZone();
+      if (tz) return tz;
+    }
+  } catch (e) { /* fallback */ }
+  return 'Asia/Tokyo';
+}
+
+function setPlainTextFormatSafe_(sheet, row, col) {
+  try {
+    const range = sheet.getRange(row, col);
+    if (range && typeof range.setNumberFormat === 'function') {
+      range.setNumberFormat('@');
+    }
+  } catch (e) { /* ignore in minimal mocks */ }
 }
 
 /**
