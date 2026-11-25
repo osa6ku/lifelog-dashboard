@@ -224,10 +224,18 @@ function getDiaryEntries(limit) {
 
     const cols = getDiaryNutritionCols_(sheet, false);
     const startRow = limit && limit > 0 ? Math.max(2, lastRow - limit + 1) : 2;
-    const values = sheet.getRange(startRow, 1, lastRow - startRow + 1, cols.totalCols).getValues();
+    const numRows = lastRow - startRow + 1;
+    const values = sheet.getRange(startRow, 1, numRows, cols.totalCols).getValues();
+    // D列（時刻）は Date 型とシート/スクリプトのタイムゾーン差でズレるため getDisplayValues() で表示値を直接取得（3-56）
+    const timeRange = sheet.getRange(startRow, 4, numRows, 1);
+    const timeDisplays = typeof timeRange.getDisplayValues === 'function' ? timeRange.getDisplayValues() : null;
     const out = [];
     for (let i = values.length - 1; i >= 0; i--) {
-      out.push(formatDiaryRow_(startRow + i, values[i], cols, ssTimeZone));
+      const r = values[i];
+      if (timeDisplays && timeDisplays[i]) {
+        r[3] = timeDisplays[i][0];
+      }
+      out.push(formatDiaryRow_(startRow + i, r, cols, ssTimeZone));
     }
     return out;
   }, { label: 'getDiaryEntries' });
@@ -444,6 +452,10 @@ function updateDiaryEntry(payload) {
     // ヘッダー行(1行目)と対象行(row行目)の2行のみを取得して O(1) 更新
     const cols = getDiaryNutritionCols_(sheet, true);
     const rowArr = sheet.getRange(row, 1, 1, cols.totalCols).getValues()[0];
+    const timeCell = sheet.getRange(row, 4);
+    if (timeCell && typeof timeCell.getDisplayValue === 'function') {
+      rowArr[3] = timeCell.getDisplayValue();
+    }
     const oldDate = formatDateVal_(rowArr[1]);
     const oldTitle = String(rowArr[4] || '');
     const oldBody = String(rowArr[5] || '').trim();

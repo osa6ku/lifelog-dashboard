@@ -156,6 +156,10 @@ function analyzeMealEntry(payload) {
       const cols = getDiaryNutritionCols_(sheet, false);
       const ssTimeZone = typeof ss.getSpreadsheetTimeZone === 'function' ? ss.getSpreadsheetTimeZone() : getSpreadsheetTimeZoneSafe_(sheet);
       const updated = sheet.getRange(row, 1, 1, cols.totalCols).getValues()[0];
+      const timeCell = sheet.getRange(row, 4);
+      if (timeCell && typeof timeCell.getDisplayValue === 'function') {
+        updated[3] = timeCell.getDisplayValue();
+      }
       updatedEntry = formatDiaryRow_(row, updated, cols, ssTimeZone);
     }
   }

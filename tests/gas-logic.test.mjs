@@ -336,6 +336,26 @@ test('3-56 GAS diary time avoids +9h shift/drift on Etc/GMT spreadsheet via plai
           }
         },
         getValue: () => (grid[row - 1] ? grid[row - 1][col - 1] : ''),
+        getDisplayValue: () => {
+          const v = grid[row - 1] ? grid[row - 1][col - 1] : '';
+          if (v instanceof Date) {
+            return `${String(v.getUTCHours()).padStart(2, '0')}:${String(v.getUTCMinutes()).padStart(2, '0')}`;
+          }
+          return String(v === null || v === undefined ? '' : v);
+        },
+        getDisplayValues: () => {
+          const out = [];
+          for (let r = 0; r < numRows; r++) {
+            const rowData = grid[row - 1 + r] || new Array(headers.length).fill('');
+            out.push(rowData.slice(col - 1, col - 1 + numCols).map(v => {
+              if (v instanceof Date) {
+                return `${String(v.getUTCHours()).padStart(2, '0')}:${String(v.getUTCMinutes()).padStart(2, '0')}`;
+              }
+              return String(v === null || v === undefined ? '' : v);
+            }));
+          }
+          return out;
+        },
         getValues: () => {
           const out = [];
           for (let r = 0; r < numRows; r++) {
