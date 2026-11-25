@@ -266,3 +266,42 @@ test('GAS doPost and doGet log stack trace, action/api, and target id/row via co
   assert.equal(errorLogs[1][1].id, '2576');
   assert.ok(String(errorLogs[1][1].stack).includes('Service error: Spreadsheets'));
 });
+
+test('3-52 GAS resolveDiaryTimeForCreate_ auto-fills JST time when omitted and preserves explicit empty string', () => {
+  const { ctx } = loadGasContext({
+    extraGlobals: {
+      Utilities: {
+        formatDate: () => '11:25',
+      },
+    },
+  });
+  assert.equal(ctx.resolveDiaryTimeForCreate_(undefined), '11:25');
+  assert.equal(ctx.resolveDiaryTimeForCreate_(null), '11:25');
+  assert.equal(ctx.resolveDiaryTimeForCreate_(''), '');
+  assert.equal(ctx.resolveDiaryTimeForCreate_('   '), '');
+  assert.equal(ctx.resolveDiaryTimeForCreate_('7:36'), '07:36');
+  assert.equal(ctx.resolveDiaryTimeForCreate_('09:45:12'), '09:45');
+
+  const rowObj = ctx.formatDiaryRow_(2, [10, '2026-11-25', '水', '7:36', '朝', '本文', '', 0, '', '', '', '', 'webapp_entry'], {
+    mealTypeCol: 0, caloriesCol: 0, nutritionCol: 0, locJsonCol: 0, totalCols: 13,
+  });
+  assert.equal(rowObj.time, '07:36');
+});
+
+test('3-53 GAS buildYearCounts_ aggregates counts per year in descending order', () => {
+  const { ctx } = loadGasContext();
+  const sample = [
+    { date: '2026-11-25' },
+    { date: '2026-01-03' },
+    { date: '2024-05-10' },
+    { date: '2012-10-25' },
+    { date: '' },
+    { date: 'invalid' },
+  ];
+  const counts = JSON.parse(JSON.stringify(ctx.buildYearCounts_(sample, 'date')));
+  assert.deepEqual(counts, [
+    { year: 2026, count: 2 },
+    { year: 2024, count: 1 },
+    { year: 2012, count: 1 },
+  ]);
+});

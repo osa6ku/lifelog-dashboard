@@ -1,5 +1,6 @@
-const APP_VERSION = 'v1.34.1';
+const APP_VERSION = 'v1.35.0';
 const DEFAULT_RELEASE_NOTES = [
+  { version: 'v1.35.0', date: '2026-11-25', title: '日記の起票時刻自動記入＆一覧閲覧性向上（年ピッカー・ヘッダ1行化・コンパクトカード）', items: ['日記の新規作成時にローカル現在時刻（HH:MM）を初期自動記入し、変更保存・意図的な空欄保存・既存編集時の時刻保持および食事導線／API作成時のJST時刻補完に対応（3-52）', 'GAS側（?api=diary / ?api=watch）から年別件数サマリー（yearCounts）を配信し、エントリが存在する年限定の移動（範囲外ボタン無効化）と件数付き年ピッカーを実装（3-53）', '日記・鑑賞記録の一覧ヘッダをスマホ幅で1行ツールバー＋展開式検索ドロワーへ集約し、カードをコンパクト化して1画面あたりの一覧性を大幅に向上（3-53）'] },
   { version: 'v1.34.1', date: '2026-11-25', title: '日記のテキスト追記・保存時のスプレッドシートサービスエラー修正＆自動リトライ導入', items: ['updateDiaryEntry で写真変更がない更新時に K列（=IMAGE() の CellImage オブジェクト）を setValues() へ書き戻さないよう分割更新＋非Dateオブジェクト除去を実装し、「Exception: サービス エラー: スプレッドシート」の根本原因を解消', 'doPost / doGet の例外捕捉へスタックトレース・action・対象ID/row の console.error 出力を追加し、全シート参照の getSheetByName 統一を検証', '一時的なスプレッドシートサービスエラーを吸収する自動リトライ（1〜2秒待機・最大2回）を冪等な読み取り・更新処理へ導入（二重記録防止のため追加系は除外）'] },
   { version: 'v1.34.0', date: '2026-11-23', title: '場所ピッカーの近傍優先検索＆支店名0件時のクエリ緩和リトライ', items: ['編集中日記の既存地点（無ければ直近履歴地点）を基準点として Nominatim へ近傍 viewbox バイアス（boundedなし）を付与し、取得候補を基準点からの距離順で並べ替えて表示', '「大戸屋 浅草橋店」など支店名付きで0件になった場合、「大戸屋 浅草橋」→「大戸屋」と段階的に語を落として自動再検索し、ステータスへ緩和検索した旨を表示（インライン／詳細モーダル共通）'] },
   { version: 'v1.33.1', date: '2026-11-23', title: 'Mac・スマホでの起動直後／タブ移動直後のスクロール・タップ不能を修正', items: ['html, body の overflow-x: hidden を overflow-x: clip へ変更し、macOS Safari / Chrome でのトラックパッド・ホイール縦スクロール固着を解消', 'touchstart での preventDefault() を完全廃止（passive: true 化）し、スマホ画面端からの縦スクロール開始および下部タブバー端寄りタップが確実に反応するよう修正', 'JSエッジスワイプ抑止を「左右端28px以内開始」かつ「明確な横優勢（dx > 24 かつ dx > dy × 2）」の touchmove のみに限定'] },
@@ -71,6 +72,7 @@ let diaryTotalCount = 0;
 let diaryFilteredCount = 0;
 let diaryHasMore = false;
 let diaryPeriodFilter = ''; // '' | 'YYYY' | 'YYYY-MM'
+let diaryYearCounts = [];
 let serverLocationHistory = [];
 
 let watchTotalCount = 0;
@@ -78,6 +80,7 @@ let watchFilteredCount = 0;
 let watchHasMore = false;
 let watchDisplayLimit = 50;
 let watchPeriodFilter = ''; // '' | 'YYYY' | 'YYYY-MM'
+let watchYearCounts = [];
 let watchSearchActive = false;
 let watchStatusBeforeSearch = null;
 let watchLastSearchQuery = '';

@@ -119,7 +119,8 @@ function queryWatchEntries_(params) {
     });
   }
 
-  const out = { ok: true, count: entries.length, totalCount, filteredCount, hasMore, entries };
+  const yearCounts = buildYearCounts_(all, 'watchDate');
+  const out = { ok: true, count: entries.length, totalCount, filteredCount, hasMore, yearCounts, entries };
   if (includeMeta) {
     out.castTags = castTags;
     out.staffTags = staffTags;

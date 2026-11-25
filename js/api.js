@@ -195,6 +195,11 @@ function getLocalTodayIso() {
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
 }
 
+function getLocalNowTimeHm(now = new Date()) {
+  const dt = now instanceof Date ? now : new Date();
+  return `${String(dt.getHours()).padStart(2, '0')}:${String(dt.getMinutes()).padStart(2, '0')}`;
+}
+
 
 function highlightElement(el) {
   if (!el) return;

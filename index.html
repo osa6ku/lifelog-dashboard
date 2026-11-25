@@ -9,7 +9,7 @@
   <link rel="manifest" href="./manifest.json">
   <link rel="apple-touch-icon" href="./apple-touch-icon.png">
   <link rel="icon" type="image/png" href="./icon-192.png">
-  <title>ライフログ・ダッシュボード v1.34.1</title>
+  <title>ライフログ・ダッシュボード v1.35.0</title>
   <link rel="stylesheet" href="./css/style.css">
 </head>
 <body>
@@ -17,7 +17,7 @@
   <div class="header-top">
     <h1 class="app-title">📚 ライフログ・ダッシュボード</h1>
     <div class="header-right">
-      <button type="button" class="ver-badge" id="app-version" onclick="openReleaseNotesModal()" title="変更履歴（リリースノート）を表示">📋 v1.34.1</button>
+      <button type="button" class="ver-badge" id="app-version" onclick="openReleaseNotesModal()" title="変更履歴（リリースノート）を表示">📋 v1.35.0</button>
       <button class="btn-sm" id="btn-check-update" onclick="manualCheckUpdate()" title="最新バージョン確認・更新">🔄 更新</button>
     </div>
   </div>
@@ -49,41 +49,53 @@
 
 <main class="container">
   <section id="view-watch" style="display:none;">
-    <div class="search-row">
-      <input class="search-input" id="watch-search" type="search" placeholder="タイトル・出演者・スタッフ・メモを全文検索..." oninput="onWatchSearchInput()" onsearch="onWatchSearchInput()" onkeydown="if(event.key==='Enter'){event.preventDefault();runWatchServerQuery();}">
-      <button type="button" class="btn-sm primary" onclick="runWatchServerQuery()" title="全期間からサーバー検索">🔍</button>
-      <button type="button" class="btn-sm" onclick="openCrossSearch(document.getElementById('watch-search').value)" title="日記＋鑑賞記録を横断検索">🌐</button>
-      <select class="sort-select" id="watch-sort" onchange="runWatchServerQuery()">
-        <option value="desc">新しい順</option>
-        <option value="asc">古い順</option>
-        <option value="rating_desc">評価順</option>
+    <div class="list-toolbar" id="watch-period-nav">
+      <select class="toolbar-select compact" id="watch-status-select" onchange="onWatchStatusSelect()" aria-label="ステータス絞り込み">
+        <option value="進行中">進行中</option>
+        <option value="完了">完了</option>
+        <option value="未着手">未着手</option>
+        <option value="ALL">すべて</option>
       </select>
+      <select class="toolbar-select year-select" id="watch-year-select" onchange="onWatchYearSelect()" aria-label="年ピッカー">
+        <option value="">直近</option>
+      </select>
+      <button type="button" class="toolbar-btn" id="watch-year-prev" onclick="stepWatchYear(-1)" title="前の年" disabled>◀</button>
+      <button type="button" class="toolbar-btn" id="watch-year-next" onclick="stepWatchYear(1)" title="次の年" disabled>▶</button>
+      <select class="toolbar-select compact" id="watch-sort" onchange="runWatchServerQuery()" aria-label="並び順">
+        <option value="desc">新着</option>
+        <option value="asc">古順</option>
+        <option value="rating_desc">評価</option>
+      </select>
+      <button type="button" class="toolbar-btn" id="btn-watch-tools" onclick="toggleListToolsDrawer('watch')" title="検索・月指定・詳細絞り込み" aria-expanded="false">🔍</button>
     </div>
-    <div class="period-nav" id="watch-period-nav">
-      <button type="button" class="btn-sm" onclick="stepWatchYear(-1)">◀ 前年</button>
-      <button type="button" class="btn-sm" onclick="stepWatchYear(1)">次年 ▶</button>
-      <button type="button" class="btn-sm" onclick="stepWatchMonth(-1)">◀ 前月</button>
-      <input id="watch-ym" type="month" onchange="onWatchYmChange()" title="年月指定">
-      <button type="button" class="btn-sm" onclick="stepWatchMonth(1)">次月 ▶</button>
-      <span id="watch-period-label" class="period-badge" style="display:none;"></span>
-      <button type="button" class="btn-sm" id="btn-watch-reset" style="display:none;" onclick="resetWatchQuery()">↩ 直近に戻す</button>
-    </div>
-    <div class="chips allow-x-scroll" id="status-chips">
-      <button class="chip active" data-val="進行中" onclick="setStatusFilter('進行中', this)">▶ 進行中</button>
-      <button class="chip" data-val="完了" onclick="setStatusFilter('完了', this)">✅ 完了</button>
-      <button class="chip" data-val="未着手" onclick="setStatusFilter('未着手', this)">📌 観たい/未着手</button>
-      <button class="chip" data-val="ALL" onclick="setStatusFilter('ALL', this)">すべて</button>
-    </div>
-    <div class="chips allow-x-scroll" id="cat-chips">
-      <button class="chip active-green" data-val="ALL" onclick="setCatFilter('ALL', this)">全区分</button>
-      <button class="chip" data-val="ドラマ" onclick="setCatFilter('ドラマ', this)">ドラマ</button>
-      <button class="chip" data-val="映画" onclick="setCatFilter('映画', this)">映画</button>
-      <button class="chip" data-val="アニメ" onclick="setCatFilter('アニメ', this)">アニメ</button>
-      <button class="chip" data-val="本" onclick="setCatFilter('本', this)">本</button>
-      <button class="chip" data-val="Netflix" onclick="setPlatFilter('Netflix', this)">Netflix</button>
-      <button class="chip" data-val="Amazon Prime Video" onclick="setPlatFilter('Amazon Prime Video', this)">Prime Video</button>
-      <button class="chip" data-val="U-NEXT" onclick="setPlatFilter('U-NEXT', this)">U-NEXT</button>
-      <button class="chip" data-val="映画館" onclick="setPlatFilter('映画館', this)">映画館</button>
+    <div class="list-tools-drawer" id="watch-tools-drawer">
+      <div class="search-row">
+        <input class="search-input" id="watch-search" type="search" placeholder="タイトル・出演者・スタッフ・メモを検索..." oninput="onWatchSearchInput()" onsearch="onWatchSearchInput()" onkeydown="if(event.key==='Enter'){event.preventDefault();runWatchServerQuery();}">
+        <button type="button" class="btn-sm primary" onclick="runWatchServerQuery()" title="全期間からサーバー検索">🔍</button>
+        <button type="button" class="btn-sm" onclick="openCrossSearch(document.getElementById('watch-search').value)" title="日記＋鑑賞記録を横断検索">🌐</button>
+      </div>
+      <div class="period-nav">
+        <input id="watch-ym" type="month" onchange="onWatchYmChange()" title="年月指定">
+        <span id="watch-period-label" class="period-badge" style="display:none;"></span>
+        <button type="button" class="btn-sm" id="btn-watch-reset" style="display:none;" onclick="resetWatchQuery()">↩ 直近に戻す</button>
+      </div>
+      <div class="chips allow-x-scroll" id="status-chips">
+        <button class="chip active" data-val="進行中" onclick="setStatusFilter('進行中', this)">▶ 進行中</button>
+        <button class="chip" data-val="完了" onclick="setStatusFilter('完了', this)">✅ 完了</button>
+        <button class="chip" data-val="未着手" onclick="setStatusFilter('未着手', this)">📌 観たい/未着手</button>
+        <button class="chip" data-val="ALL" onclick="setStatusFilter('ALL', this)">すべて</button>
+      </div>
+      <div class="chips allow-x-scroll" id="cat-chips">
+        <button class="chip active-green" data-val="ALL" onclick="setCatFilter('ALL', this)">全区分</button>
+        <button class="chip" data-val="ドラマ" onclick="setCatFilter('ドラマ', this)">ドラマ</button>
+        <button class="chip" data-val="映画" onclick="setCatFilter('映画', this)">映画</button>
+        <button class="chip" data-val="アニメ" onclick="setCatFilter('アニメ', this)">アニメ</button>
+        <button class="chip" data-val="本" onclick="setCatFilter('本', this)">本</button>
+        <button class="chip" data-val="Netflix" onclick="setPlatFilter('Netflix', this)">Netflix</button>
+        <button class="chip" data-val="Amazon Prime Video" onclick="setPlatFilter('Amazon Prime Video', this)">Prime Video</button>
+        <button class="chip" data-val="U-NEXT" onclick="setPlatFilter('U-NEXT', this)">U-NEXT</button>
+        <button class="chip" data-val="映画館" onclick="setPlatFilter('映画館', this)">映画館</button>
+      </div>
     </div>
     <div class="count-bar" id="watch-count">読み込み中...</div>
     <div id="watch-list"><div class="loading">鑑賞記録を読み込んでいます...</div></div>
@@ -93,23 +105,29 @@
   </section>
 
   <section id="view-diary">
-    <div class="search-row">
-      <input class="search-input" id="diary-search" type="search" placeholder="日記のタイトル・本文・場所を全文検索..." onkeydown="if(event.key==='Enter'){event.preventDefault();runDiaryServerQuery();}">
-      <button type="button" class="btn-sm primary" onclick="runDiaryServerQuery()" title="全期間からサーバー検索">🔍</button>
-      <button type="button" class="btn-sm" onclick="openCrossSearch(document.getElementById('diary-search').value)" title="日記＋鑑賞記録を横断検索">🌐</button>
-      <select class="sort-select" id="diary-sort" onchange="runDiaryServerQuery()">
+    <div class="list-toolbar" id="diary-period-nav">
+      <select class="toolbar-select year-select" id="diary-year-select" onchange="onDiaryYearSelect()" aria-label="年ピッカー">
+        <option value="">直近</option>
+      </select>
+      <button type="button" class="toolbar-btn" id="diary-year-prev" onclick="stepDiaryYear(-1)" title="前の年" disabled>◀</button>
+      <button type="button" class="toolbar-btn" id="diary-year-next" onclick="stepDiaryYear(1)" title="次の年" disabled>▶</button>
+      <select class="toolbar-select compact" id="diary-sort" onchange="runDiaryServerQuery()" aria-label="並び順">
         <option value="desc">新しい順</option>
         <option value="asc">古い順</option>
       </select>
+      <button type="button" class="toolbar-btn" id="btn-diary-tools" onclick="toggleListToolsDrawer('diary')" title="検索・月指定" aria-expanded="false">🔍</button>
     </div>
-    <div class="period-nav" id="diary-period-nav">
-      <button type="button" class="btn-sm" onclick="stepDiaryYear(-1)">◀ 前年</button>
-      <button type="button" class="btn-sm" onclick="stepDiaryYear(1)">次年 ▶</button>
-      <button type="button" class="btn-sm" onclick="stepDiaryMonth(-1)">◀ 前月</button>
-      <input id="diary-ym" type="month" onchange="onDiaryYmChange()" title="年月指定">
-      <button type="button" class="btn-sm" onclick="stepDiaryMonth(1)">次月 ▶</button>
-      <span id="diary-period-label" class="period-badge" style="display:none;"></span>
-      <button type="button" class="btn-sm" id="btn-diary-reset" style="display:none;" onclick="resetDiaryQuery()">↩ 直近に戻す</button>
+    <div class="list-tools-drawer" id="diary-tools-drawer">
+      <div class="search-row">
+        <input class="search-input" id="diary-search" type="search" placeholder="日記のタイトル・本文・場所を検索..." onkeydown="if(event.key==='Enter'){event.preventDefault();runDiaryServerQuery();}">
+        <button type="button" class="btn-sm primary" onclick="runDiaryServerQuery()" title="全期間からサーバー検索">🔍</button>
+        <button type="button" class="btn-sm" onclick="openCrossSearch(document.getElementById('diary-search').value)" title="日記＋鑑賞記録を横断検索">🌐</button>
+      </div>
+      <div class="period-nav">
+        <input id="diary-ym" type="month" onchange="onDiaryYmChange()" title="年月指定">
+        <span id="diary-period-label" class="period-badge" style="display:none;"></span>
+        <button type="button" class="btn-sm" id="btn-diary-reset" style="display:none;" onclick="resetDiaryQuery()">↩ 直近に戻す</button>
+      </div>
     </div>
     <div class="count-bar" id="diary-count">読み込み中...</div>
     <div id="diary-list"><div class="loading">日記を読み込んでいます...</div></div>

@@ -2,6 +2,8 @@ function syncWatchStatusChipsUi() {
   document.querySelectorAll('#status-chips .chip').forEach(c => {
     c.classList.toggle('active', c.dataset && c.dataset.val === statusFilter);
   });
+  const sel = document.getElementById('watch-status-select');
+  if (sel) sel.value = statusFilter;
 }
 
 async function loadWatchData(opts = {}) {
@@ -63,6 +65,10 @@ async function loadWatchData(opts = {}) {
   const data = await apiGet(params);
   if (Array.isArray(data.castTags) && data.castTags.length > 0) serverWatchCastTags = data.castTags;
   if (Array.isArray(data.staffTags) && data.staffTags.length > 0) serverWatchStaffTags = data.staffTags;
+  if (Array.isArray(data.yearCounts)) {
+    watchYearCounts = data.yearCounts;
+    renderYearPicker('watch', watchYearCounts, watchPeriodFilter);
+  }
   watchTotalCount = Number(data.totalCount || (data.entries || []).length);
   watchFilteredCount = Number(data.filteredCount !== undefined ? data.filteredCount : (data.entries || []).length);
   watchHasMore = Boolean(data.hasMore);
@@ -76,6 +82,7 @@ async function loadWatchData(opts = {}) {
     watchDisplayLimit = 50;
     watchData = data.entries || [];
   }
+  updatePeriodUi('watch', ym, q, sort);
   renderWatch();
 }
 
@@ -91,8 +98,24 @@ function onWatchSearchInput() {
 }
 
 function stepWatchYear(delta) {
-  watchPeriodFilter = shiftYearStr(watchPeriodFilter, delta);
+  const next = stepAvailableYear(watchPeriodFilter, delta, watchYearCounts);
+  if (!next) return;
+  watchPeriodFilter = next;
   runWatchServerQuery();
+}
+
+function onWatchYearSelect() {
+  const sel = document.getElementById('watch-year-select');
+  watchPeriodFilter = sel ? (sel.value || '') : '';
+  const ymEl = document.getElementById('watch-ym');
+  if (ymEl) ymEl.value = '';
+  runWatchServerQuery();
+}
+
+function onWatchStatusSelect() {
+  const sel = document.getElementById('watch-status-select');
+  if (!sel) return;
+  setStatusFilter(sel.value || '進行中', null);
 }
 
 function stepWatchMonth(delta) {
@@ -357,38 +380,24 @@ function renderWatch() {
   if (sliced.length === 0) { container.innerHTML = '<div class="loading">該当する記録がありません</div>'; return; }
   container.innerHTML = sliced.map(item => {
     const bClass = item.status === '進行中' ? 'b-inprog' : item.status === '完了' ? 'b-done' : 'b-todo';
-    const nextStatus = item.status === '進行中' ? '完了' : '進行中';
-    const nextLabel = item.status === '進行中' ? '✅ 完了にする' : '▶ 進行中に戻す';
     const stars = item.rating ? '★'.repeat(Number(item.rating)) : '';
     const cleanTitle = sanitizeDisplayText(item.title);
-    const castList = parsePersonTags(item.cast);
-    const castSummary = castList.length > 0
-      ? `👥 ${castList.length}名: ${castList.slice(0, 6).join(', ')}${castList.length > 6 ? ' …' : ''}`
-      : '';
     const memoSnippet = item.memo
-      ? `<div class="card-cast list-snippet">📝 ${renderRichText(item.memo)}</div>`
+      ? `<div class="card-cast compact-memo list-snippet">${renderRichText(item.memo)}</div>`
       : '';
     return `
-      <div class="card list-card" id="wcard-${item.row}" onclick="onWatchCardTap(${item.row}, '${esc(item.id)}', event)">
-        <div class="card-head"><div class="card-title">${esc(cleanTitle)}</div><span class="badge ${bClass}">${esc(item.status || '未設定')}</span></div>
-        <div class="meta-row">
+      <div class="card watch-card list-card compact-card" id="wcard-${item.row}" onclick="onWatchCardTap(${item.row}, '${esc(item.id)}', event)">
+        <div class="card-head">
+          <div class="card-title compact-title">${esc(cleanTitle)}</div>
+          <span class="badge ${bClass}">${esc(item.status || '未設定')}</span>
+        </div>
+        <div class="meta-row compact-meta">
           <span class="tag-pill">${esc(item.category)}</span>
-          ${item.watchDate ? `<span>📅 ${esc(item.watchDate)}</span>` : ''}
-          ${item.releaseYear ? `<span>(${esc(item.releaseYear)})</span>` : ''}
+          ${item.watchDate ? `<span>${esc(item.watchDate)}</span>` : ''}
           ${stars ? `<span style="color:#f59e0b;font-weight:700;">${stars}</span>` : ''}
-          ${item.platform ? `<span class="tag-pill">📺 ${esc(item.platform)}</span>` : ''}
+          ${item.platform ? `<span class="tag-pill">${esc(item.platform)}</span>` : ''}
         </div>
-        ${renderRelatedUrlBadges(item.relatedUrl)}
-        ${castSummary ? `<div class="card-cast">${esc(castSummary)}</div>` : ''}
         ${memoSnippet}
-        <div class="card-actions" onclick="event.stopPropagation()">
-          <button class="btn-sm primary" onclick="openEditWatchModal(${item.row}, '${esc(item.id)}')">✏️ 編集</button>
-          <button class="btn-sm success" onclick="quickUpdate(${item.row}, {status:'${nextStatus}'})">${nextLabel}</button>
-          <select class="btn-sm" onchange="if(this.value) quickUpdate(${item.row}, {rating:this.value})">
-            <option value="">評価変更</option><option value="5">★5</option><option value="4">★4</option><option value="3">★3</option><option value="2">★2</option><option value="1">★1</option>
-          </select>
-          <button class="btn-sm" onclick="quickUpdate(${item.row}, {runWiki:true})">🌐 Wikipedia補完</button>
-        </div>
       </div>`;
   }).join('');
 }

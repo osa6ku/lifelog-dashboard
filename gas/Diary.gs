@@ -60,8 +60,9 @@ function queryDiaryEntries_(params) {
   const entries = limit > 0 ? filtered.slice(offset, offset + limit) : filtered;
   const hasMore = limit > 0 && (offset + limit < filteredCount);
   const locationPresets = getLocationPresets();
+  const yearCounts = buildYearCounts_(all, 'date');
 
-  const out = { ok: true, count: entries.length, totalCount, filteredCount, hasMore, locationPresets, entries };
+  const out = { ok: true, count: entries.length, totalCount, filteredCount, hasMore, locationPresets, yearCounts, entries };
   if (includeMeta) {
     out.locationHistory = locationHistory;
   }
@@ -174,6 +175,7 @@ function formatDiaryRow_(row, r, cols) {
     id: r[0],
     date: formatDateVal_(r[1]),
     weekday: String(r[2] || ''),
+    time: formatTimeVal_(r[3]),
     title: String(r[4] || ''),
     body: String(r[5] || ''),
     location: locText,
@@ -360,7 +362,7 @@ function addDiaryEntry(payload) {
   const imageFormula = firstFileId ? `=IMAGE("https://drive.google.com/uc?export=view&id=${firstFileId}")` : '';
   const docId = YEAR_DOC_IDS[year] || '';
   const docUrl = docId ? `https://docs.google.com/document/d/${docId}/edit` : '';
-  const timeStr = Utilities.formatDate(new Date(), 'Asia/Tokyo', 'HH:mm');
+  const timeStr = resolveDiaryTimeForCreate_(payload.time);
 
   const cols = getDiaryNutritionCols_(sheet, true);
   const rowArr = new Array(cols.totalCols).fill('');
@@ -453,6 +455,9 @@ function updateDiaryEntry(payload) {
 
     rowArr[1] = dateStr;
     rowArr[2] = weekday;
+    if (payload.time !== undefined) {
+      rowArr[3] = payload.time === null ? '' : formatTimeVal_(payload.time);
+    }
     rowArr[4] = title;
     rowArr[5] = body;
     rowArr[6] = location;

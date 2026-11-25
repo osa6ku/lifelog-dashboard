@@ -1,10 +1,94 @@
+function getAvailableYearsAsc(yearCounts) {
+  return (Array.isArray(yearCounts) ? yearCounts : [])
+    .filter(x => x && Number(x.year) > 0 && Number(x.count) > 0)
+    .map(x => Number(x.year))
+    .sort((a, b) => a - b);
+}
+
+/**
+ * エントリが存在する年のみを対象に前年(delta=-1)／次年(delta=+1)を解決する（3-53）。
+ * 範囲外（最古年より前・最新年より後・直近モードでの次年）の場合は null を返す。
+ */
+function stepAvailableYear(curPeriod, delta, yearCounts) {
+  const years = getAvailableYearsAsc(yearCounts);
+  if (years.length === 0) return null;
+  const dir = delta < 0 ? -1 : 1;
+  const m = String(curPeriod || '').match(/^(\d{4})/);
+  if (!m) {
+    // 「直近」表示中: 次年へは進めず（null）、前年なら最新年の1つ前（1年しかなければその年）へ移動
+    if (dir > 0) return null;
+    if (years.length >= 2) return String(years[years.length - 2]);
+    return String(years[0]);
+  }
+  const curY = Number(m[1]);
+  const idx = years.indexOf(curY);
+  if (idx >= 0) {
+    const nextIdx = idx + dir;
+    if (nextIdx < 0 || nextIdx >= years.length) return null;
+    return String(years[nextIdx]);
+  }
+  if (dir < 0) {
+    const older = years.filter(y => y < curY);
+    return older.length > 0 ? String(older[older.length - 1]) : null;
+  }
+  const newer = years.filter(y => y > curY);
+  return newer.length > 0 ? String(newer[0]) : null;
+}
+
+function renderYearPicker(prefix, yearCounts, curPeriod) {
+  const sel = document.getElementById(`${prefix}-year-select`);
+  if (!sel) return;
+  const list = (Array.isArray(yearCounts) ? yearCounts : [])
+    .filter(x => x && Number(x.year) > 0 && Number(x.count) > 0)
+    .sort((a, b) => Number(b.year) - Number(a.year));
+  const curYear = /^\d{4}/.test(String(curPeriod || '')) ? String(curPeriod).slice(0, 4) : '';
+  const defaultLabel = prefix === 'diary' ? '直近' : '直近';
+  const options = [`<option value="">${defaultLabel}</option>`];
+  list.forEach(item => {
+    const y = String(item.year);
+    options.push(`<option value="${y}">${y}年 (${item.count})</option>`);
+  });
+  sel.innerHTML = options.join('');
+  sel.value = list.some(x => String(x.year) === curYear) ? curYear : '';
+  updateYearNavButtons(prefix, curPeriod, list);
+}
+
+function updateYearNavButtons(prefix, curPeriod, yearCounts) {
+  const prevBtn = document.getElementById(`${prefix}-year-prev`);
+  const nextBtn = document.getElementById(`${prefix}-year-next`);
+  if (prevBtn) prevBtn.disabled = stepAvailableYear(curPeriod, -1, yearCounts) === null;
+  if (nextBtn) nextBtn.disabled = stepAvailableYear(curPeriod, 1, yearCounts) === null;
+}
+
+function toggleListToolsDrawer(prefix) {
+  const drawer = document.getElementById(`${prefix}-tools-drawer`);
+  const btn = document.getElementById(`btn-${prefix}-tools`);
+  if (!drawer) return;
+  const isOpen = drawer.classList.toggle('open');
+  if (btn) btn.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+  if (isOpen) {
+    const searchEl = document.getElementById(`${prefix}-search`);
+    if (searchEl && typeof searchEl.focus === 'function') searchEl.focus();
+  }
+}
+
 function updatePeriodUi(prefix, periodVal, q, sortVal) {
   const labelEl = document.getElementById(`${prefix}-period-label`);
   const resetBtn = document.getElementById(`btn-${prefix}-reset`);
   const ymInput = document.getElementById(`${prefix}-ym`);
+  const yearSel = document.getElementById(`${prefix}-year-select`);
+  const toolsBtn = document.getElementById(`btn-${prefix}-tools`);
+  const yearCounts = prefix === 'diary' ? diaryYearCounts : watchYearCounts;
+
   if (ymInput) {
     ymInput.value = /^\d{4}-\d{2}$/.test(periodVal) ? periodVal : '';
   }
+  if (yearSel) {
+    const y = /^\d{4}/.test(String(periodVal || '')) ? String(periodVal).slice(0, 4) : '';
+    yearSel.value = y;
+  }
+  updateYearNavButtons(prefix, periodVal, yearCounts);
+
   if (labelEl) {
     if (periodVal) {
       labelEl.textContent = /^\d{4}$/.test(periodVal) ? `${periodVal}年` : periodVal;
@@ -13,6 +97,8 @@ function updatePeriodUi(prefix, periodVal, q, sortVal) {
       labelEl.style.display = 'none';
     }
   }
+  const hasDrawerFilter = Boolean(q || /^\d{4}-\d{2}$/.test(periodVal || ''));
+  if (toolsBtn) toolsBtn.classList.toggle('active-filter', hasDrawerFilter);
   const isCustom = Boolean(periodVal || q || (sortVal && sortVal !== 'desc'));
   if (resetBtn) resetBtn.style.display = isCustom ? 'inline-block' : 'none';
 }

@@ -41,6 +41,10 @@ async function loadDiaryData(forceRenderNut, opts = {}) {
   if (Array.isArray(data.locationHistory) && data.locationHistory.length > 0) {
     serverLocationHistory = data.locationHistory;
   }
+  if (Array.isArray(data.yearCounts)) {
+    diaryYearCounts = data.yearCounts;
+    renderYearPicker('diary', diaryYearCounts, diaryPeriodFilter);
+  }
   diaryTotalCount = Number(data.totalCount || (data.entries || []).length);
   diaryFilteredCount = Number(data.filteredCount !== undefined ? data.filteredCount : (data.entries || []).length);
   diaryHasMore = Boolean(data.hasMore);
@@ -54,6 +58,7 @@ async function loadDiaryData(forceRenderNut, opts = {}) {
     diaryDisplayLimit = 80;
     diaryData = data.entries || [];
   }
+  updatePeriodUi('diary', ym, q, sort);
   renderDiary();
   if (forceRenderNut || document.getElementById('view-nutrition').style.display !== 'none') {
     renderNutritionView();
@@ -65,7 +70,17 @@ function runDiaryServerQuery() {
 }
 
 function stepDiaryYear(delta) {
-  diaryPeriodFilter = shiftYearStr(diaryPeriodFilter, delta);
+  const next = stepAvailableYear(diaryPeriodFilter, delta, diaryYearCounts);
+  if (!next) return;
+  diaryPeriodFilter = next;
+  runDiaryServerQuery();
+}
+
+function onDiaryYearSelect() {
+  const sel = document.getElementById('diary-year-select');
+  diaryPeriodFilter = sel ? (sel.value || '') : '';
+  const ymEl = document.getElementById('diary-ym');
+  if (ymEl) ymEl.value = '';
   runDiaryServerQuery();
 }
 
@@ -328,47 +343,34 @@ function buildDiaryCardHtml(d) {
   const ids = d.imageIds || [];
   const urls = d.imageUrls || [];
   const locs = normalizeDiaryLocations(d);
-  const coordLocs = locs.filter(l => l.lat !== null && l.lng !== null);
-  let mapLinkHtml = '';
-  if (coordLocs.length === 1) {
-    mapLinkHtml = `<a class="loc-badge" style="background:#ecfdf5;color:#047857;border-color:#a7f3d0;" target="_blank" rel="noopener" href="https://www.google.com/maps/search/?api=1&query=${coordLocs[0].lat},${coordLocs[0].lng}">🗺️ Googleマップで開く</a>`;
-  } else if (coordLocs.length >= 2) {
-    const dirPath = coordLocs.map(l => `${l.lat},${l.lng}`).join('/');
-    mapLinkHtml = `<a class="loc-badge" style="background:#ecfdf5;color:#047857;border-color:#a7f3d0;" target="_blank" rel="noopener" href="https://www.google.com/maps/dir/${dirPath}">🗺️ Googleマップで経路を開く (${coordLocs.length}地点)</a>`;
-  }
-  const locHtml = locs.length > 0
-    ? `<div class="meta-row">${locs.map(l => {
-        const hasCoord = l.lat !== null && l.lng !== null;
-        const href = hasCoord
-          ? `https://www.google.com/maps/search/?api=1&query=${l.lat},${l.lng}`
-          : `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(l.name)}`;
-        return `<a class="loc-badge" target="_blank" rel="noopener" title="${hasCoord ? `${l.lat},${l.lng}` : '名称検索'}" href="${href}">📍 ${esc(l.name)}</a>`;
-      }).join('')}${mapLinkHtml}</div>`
-    : '';
+  const locBadgesHtml = locs.slice(0, 3).map(l => {
+    const hasCoord = l.lat !== null && l.lng !== null;
+    const href = hasCoord
+      ? `https://www.google.com/maps/search/?api=1&query=${l.lat},${l.lng}`
+      : `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(l.name)}`;
+    return `<a class="loc-badge compact" target="_blank" rel="noopener" title="${hasCoord ? `${l.lat},${l.lng}` : '名称検索'}" href="${href}">📍${esc(l.name)}</a>`;
+  }).join('') + (locs.length > 3 ? `<span class="compact-more-badge">+${locs.length - 3}</span>` : '');
+
+  const photoCount = Math.max(ids.length, urls.length, Number(d.imageCount || 0));
+  const photoBadgeHtml = photoCount > 0 ? `<span class="compact-photo-badge">📷${photoCount}</span>` : '';
+
   const mediaHtml = ids.length > 0
-    ? `<div class="thumb-strip allow-x-scroll">${ids.map((fid, i) => `<img class="thumb-img" data-file-id="${esc(fid)}" src="${placeholder}" alt="写真${i + 1}" onclick="event.stopPropagation(); openImagePreview('${esc(fid)}','${esc(urls[i] || '')}')">`).join('')}</div>`
-    : (urls.length > 0 ? `<div class="meta-row" style="margin-top:8px;">${urls.map((u, i) => `<a class="q-link" target="_blank" href="${esc(u)}">📷 写真${i + 1}</a>`).join('')}</div>` : '');
+    ? `<div class="thumb-strip compact-thumb-strip allow-x-scroll">${ids.map((fid, i) => `<img class="thumb-img compact" data-file-id="${esc(fid)}" src="${placeholder}" alt="写真${i + 1}" onclick="event.stopPropagation(); openImagePreview('${esc(fid)}','${esc(urls[i] || '')}')">`).join('')}</div>`
+    : (urls.length > 0 ? `<div class="meta-row compact-meta">${urls.map((u, i) => `<a class="q-link" target="_blank" href="${esc(u)}">📷 写真${i + 1}</a>`).join('')}</div>` : '');
 
   const dayMeals = mealData.filter(m => m.date === d.date).sort((a, b) => (MEAL_ORDER[a.mealType] || 9) - (MEAL_ORDER[b.mealType] || 9));
-  let mealHtml = '';
+  let mealBadgeHtml = '';
   if (dayMeals.length > 0) {
     const sumK = dayMeals.reduce((s, m) => s + Number(m.calories || 0), 0);
-    const mealPills = dayMeals.map(m => `<span class="meal-badge" style="margin-top:4px;cursor:pointer;" onclick="goToMealDate('${esc(d.date)}')">${esc(m.mealType)}: ${esc(m.dishName)}${m.calories ? ` (${esc(m.calories)}kcal)` : ''}</span>`).join(' ');
-    mealHtml = `<div style="margin-top:6px;"><span style="font-size:11px;font-weight:700;color:#047857;cursor:pointer;" onclick="goToMealDate('${esc(d.date)}')">🍽️ 食事記録へ (${dayMeals.length}食${sumK ? ` / 計${sumK}kcal` : ''}) ›</span><div>${mealPills}</div></div>`;
+    mealBadgeHtml = `<span class="meal-badge compact" style="cursor:pointer;" onclick="goToMealDate('${esc(d.date)}')">🍽️${dayMeals.length}食${sumK ? `/${sumK}kcal` : ''}</span>`;
   } else {
     const hasMeal = d.calories !== '' && d.calories !== undefined && d.calories !== null;
-    const pfcParts = [
-      d.protein !== '' && d.protein !== undefined ? `P:${d.protein}g` : '',
-      d.fat !== '' && d.fat !== undefined ? `F:${d.fat}g` : '',
-      d.carbs !== '' && d.carbs !== undefined ? `C:${d.carbs}g` : '',
-    ].filter(Boolean).join(' ');
-    if (d.mealType || hasMeal || d.nutritionAdvice) {
-      mealHtml = `<div class="meal-badge">🍽️ ${esc(d.mealType || '食事')}${hasMeal ? ` ・ ${esc(d.calories)} kcal` : ''}${pfcParts ? `（${esc(pfcParts)}）` : ''}</div>${d.nutritionAdvice ? `<div class="card-cast">💡 ${esc(d.nutritionAdvice)}</div>` : ''}`;
+    if (d.mealType || hasMeal) {
+      mealBadgeHtml = `<span class="meal-badge compact">🍽️${esc(d.mealType || '食事')}${hasMeal ? ` ${esc(d.calories)}kcal` : ''}</span>`;
     }
   }
 
   const cleanTitle = String(d.title || '').trim();
-  const titleHtml = cleanTitle ? `<h3 class="card-title">${esc(cleanTitle)}</h3>` : '';
   const rowNum = Number(d.row || 0);
   const isEditing = activeInlineEdit && activeInlineEdit.type === 'diary' && Number(activeInlineEdit.row) === rowNum;
   const inlineLocChipsHtml = isEditing ? buildInlineLocChipsHtml(rowNum) : '';
@@ -393,23 +395,20 @@ function buildDiaryCardHtml(d) {
           <button class="btn-sm" onclick="openDetailFromInline('diary', ${rowNum}, '${esc(d.id)}')">⚙️ 日付・写真などの詳細</button>
         </div>
       </div>`
-    : `<div class="card-summary list-snippet">${d.body ? renderRichText(d.body) : '<span style="color:#9ca3af;">タップして編集・本文を追記...</span>'}</div>`;
+    : `<div class="card-summary compact-summary list-snippet">${d.body ? renderRichText(d.body) : '<span style="color:#9ca3af;">タップして編集...</span>'}</div>`;
   const timeLabel = d.time ? ` ${d.time}` : '';
+  const badgesRowHtml = (!isEditing && (locBadgesHtml || mealBadgeHtml || photoBadgeHtml))
+    ? `<div class="meta-row compact-meta">${photoBadgeHtml}${locBadgesHtml}${mealBadgeHtml}</div>`
+    : '';
   return `
-    <div class="card diary-card list-card" id="dcard-${rowNum}" onclick="onDiaryCardTap(${rowNum}, '${esc(d.id)}', event)">
-      <div class="card-header">
-        <div class="card-date">${esc(formatDiaryDateLabel(d.date, d.weekday))}${esc(timeLabel)}</div>
-        ${isEditing ? '' : titleHtml}
+    <div class="card diary-card list-card compact-card" id="dcard-${rowNum}" onclick="onDiaryCardTap(${rowNum}, '${esc(d.id)}', event)">
+      <div class="diary-card-head">
+        <span class="card-date">${esc(formatDiaryDateLabel(d.date, d.weekday))}${esc(timeLabel)}</span>
+        ${(!isEditing && cleanTitle) ? `<span class="card-title compact-title">${esc(cleanTitle)}</span>` : ''}
       </div>
-      ${isEditing ? '' : locHtml}
-      ${mediaHtml}
       ${bodyHtml}
-      ${mealHtml}
-      ${isEditing ? '' : `<div class="card-actions" onclick="event.stopPropagation()">
-        <button class="btn-sm primary" onclick="openEditDiaryModal(${rowNum}, '${esc(d.id)}')">✏️ 編集</button>
-        <button class="btn-sm success" onclick="quickAnalyzeMeal(${rowNum}, '${esc(d.id)}')">🍽️ 栄養分析</button>
-        <button class="btn-sm" onclick="openMealModal('${esc(d.date)}')">＋ 食事追加</button>
-      </div>`}
+      ${badgesRowHtml}
+      ${mediaHtml}
     </div>`;
 }
 
@@ -487,7 +486,7 @@ function openDiaryModal() {
   document.getElementById('d-photos-label').textContent = '写真（自動で1200px以下にリサイズしてDrive保存）';
   document.getElementById('d-date').value = getLocalTodayIso();
   const timeEl = document.getElementById('d-time');
-  if (timeEl) timeEl.value = '';
+  if (timeEl) timeEl.value = getLocalNowTimeHm();
   document.getElementById('d-title').value = '';
   document.getElementById('d-loc').value = '';
   document.getElementById('d-body').value = '';
@@ -518,7 +517,10 @@ function openEditDiaryModal(row, id) {
   document.getElementById('d-photos-label').textContent = '写真（既存写真の削除 / 新規写真の追加）';
   document.getElementById('d-date').value = entry.date || '';
   const timeEl = document.getElementById('d-time');
-  if (timeEl) timeEl.value = /^\d{2}:\d{2}/.test(String(entry.time || '')) ? String(entry.time).slice(0, 5) : '';
+  if (timeEl) {
+    const mTime = String(entry.time || '').trim().match(/^(\d{1,2}):(\d{2})/);
+    timeEl.value = mTime ? `${mTime[1].padStart(2, '0')}:${mTime[2]}` : '';
+  }
   document.getElementById('d-title').value = sanitizeDisplayText(entry.title || '');
   document.getElementById('d-loc').value = '';
   document.getElementById('d-body').value = sanitizeDisplayText(entry.body || '');
@@ -555,6 +557,7 @@ async function goToDiaryDate(date) {
     try {
       const res = await apiPost('addDiary', {
         date,
+        time: getLocalNowTimeHm(),
         title: `${date}の日記`,
         body: '（食事記録から作成）',
         location: '',
@@ -616,10 +619,13 @@ async function submitDiary() {
   }
 
   const dateVal = document.getElementById('d-date').value;
+  const timeEl = document.getElementById('d-time');
+  const timeVal = timeEl ? String(timeEl.value || '').trim() : '';
   const titleVal = document.getElementById('d-title').value;
   const locsCopy = diaryLocations.map(l => ({ ...l }));
   const payload = {
     date: dateVal,
+    time: timeVal,
     title: titleVal,
     location: locsCopy.map(l => l.name).join('\n'),
     locations: locsCopy,
@@ -653,6 +659,7 @@ async function submitDiary() {
     id: tempKey,
     date: dateVal,
     weekday: wd,
+    time: timeVal,
     title: titleVal,
     body,
     location: payload.location,

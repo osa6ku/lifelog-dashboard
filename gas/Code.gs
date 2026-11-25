@@ -209,6 +209,50 @@ function formatDateVal_(val) {
   return String(val).slice(0, 10);
 }
 
+function formatTimeVal_(val) {
+  if (val === null || val === undefined || val === '') return '';
+  if (val instanceof Date) {
+    return Utilities.formatDate(val, 'Asia/Tokyo', 'HH:mm');
+  }
+  const s = String(val).trim();
+  if (!s) return '';
+  const m = s.match(/^(\d{1,2}):(\d{2})/);
+  if (m) {
+    return `${m[1].padStart(2, '0')}:${m[2]}`;
+  }
+  return s;
+}
+
+/**
+ * 日記作成時の時刻解決（3-52）:
+ * - undefined / null（未指定）の場合のみ JST 現在時刻（HH:mm）を自動補完する。
+ * - 空文字 "" が明示送信された場合はユーザーの意図的な消去として空欄を保持する。
+ */
+function resolveDiaryTimeForCreate_(rawTime) {
+  if (rawTime === undefined || rawTime === null) {
+    return Utilities.formatDate(new Date(), 'Asia/Tokyo', 'HH:mm');
+  }
+  const s = String(rawTime).trim();
+  if (!s) return '';
+  return formatTimeVal_(s);
+}
+
+/**
+ * 年別件数サマリー配列を生成（3-53）: [{ year: 2026, count: 325 }, ...] 新しい年順
+ */
+function buildYearCounts_(entries, dateField) {
+  const counts = {};
+  (entries || []).forEach(item => {
+    const m = String((item && item[dateField]) || '').match(/^(\d{4})/);
+    if (!m) return;
+    const y = Number(m[1]);
+    counts[y] = (counts[y] || 0) + 1;
+  });
+  return Object.keys(counts)
+    .map(y => ({ year: Number(y), count: counts[y] }))
+    .sort((a, b) => b.year - a.year);
+}
+
 // ============================================================================
 // 食事カロリー＆栄養バランス（PFC）分析 API
 // ============================================================================
