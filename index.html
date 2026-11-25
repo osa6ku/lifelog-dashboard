@@ -9,7 +9,7 @@
   <link rel="manifest" href="./manifest.json">
   <link rel="apple-touch-icon" href="./apple-touch-icon.png">
   <link rel="icon" type="image/png" href="./icon-192.png">
-  <title>ライフログ・ダッシュボード v1.36.1</title>
+  <title>ライフログ・ダッシュボード v1.36.2</title>
   <link rel="stylesheet" href="./css/style.css">
 </head>
 <body>
@@ -17,7 +17,7 @@
   <div class="header-top">
     <h1 class="app-title">📚 ライフログ・ダッシュボード</h1>
     <div class="header-right">
-      <button type="button" class="ver-badge" id="app-version" onclick="openReleaseNotesModal()" title="変更履歴（リリースノート）を表示">📋 v1.36.1</button>
+      <button type="button" class="ver-badge" id="app-version" onclick="openReleaseNotesModal()" title="変更履歴（リリースノート）を表示">📋 v1.36.2</button>
       <button class="btn-sm" id="btn-check-update" onclick="manualCheckUpdate()" title="最新バージョン確認・更新">🔄 更新</button>
     </div>
   </div>
@@ -71,7 +71,7 @@
     </div>
     <div class="list-tools-drawer" id="watch-tools-drawer">
       <div class="search-row">
-        <input class="search-input" id="watch-search" type="search" placeholder="タイトル・出演者・スタッフ・メモを検索..." oninput="onWatchSearchInput()" onsearch="onWatchSearchInput()" onkeydown="if(event.key==='Enter'){event.preventDefault();runWatchServerQuery();}">
+        <input class="search-input" id="watch-search" type="search" placeholder="タイトル・出演者・スタッフ・メモを検索..." oninput="onWatchSearchInput()" onsearch="onWatchSearchInput()" onkeydown="if(isPlainEnterKey(event,this)){event.preventDefault();runWatchServerQuery();}">
         <button type="button" class="btn-sm primary" onclick="runWatchServerQuery()" title="全期間からサーバー検索">🔍</button>
         <button type="button" class="btn-sm" onclick="openCrossSearch(document.getElementById('watch-search').value)" title="日記＋鑑賞記録を横断検索">🌐</button>
       </div>
@@ -123,7 +123,7 @@
     </div>
     <div class="list-tools-drawer" id="diary-tools-drawer">
       <div class="search-row">
-        <input class="search-input" id="diary-search" type="search" placeholder="日記のタイトル・本文・場所を検索..." onkeydown="if(event.key==='Enter'){event.preventDefault();runDiaryServerQuery();}">
+        <input class="search-input" id="diary-search" type="search" placeholder="日記のタイトル・本文・場所を検索..." onkeydown="if(isPlainEnterKey(event,this)){event.preventDefault();runDiaryServerQuery();}">
         <button type="button" class="btn-sm primary" onclick="runDiaryServerQuery()" title="全期間からサーバー検索">🔍</button>
         <button type="button" class="btn-sm" onclick="openCrossSearch(document.getElementById('diary-search').value)" title="日記＋鑑賞記録を横断検索">🌐</button>
       </div>
@@ -188,7 +188,7 @@
       <label>👥 出演者（キャスト）<span id="w-cast-count"></span></label>
       <div id="w-cast-chips" class="person-chips-wrap"></div>
       <div class="loc-row">
-        <input id="w-cast-input" placeholder="名前を入力して Enter / ＋（カンマ区切り一括追加可）" onfocus="showWatchChipSuggestions('cast')" oninput="showWatchChipSuggestions('cast')" onblur="hideWatchTagSuggestions('w-cast-suggest')" onkeydown="if(event.key==='Enter'){event.preventDefault();addWatchPersonFromInput('cast');}">
+        <input id="w-cast-input" placeholder="名前を入力して Enter / ＋（カンマ区切り一括追加可）" onfocus="showWatchChipSuggestions('cast')" oninput="showWatchChipSuggestions('cast')" onblur="hideWatchTagSuggestions('w-cast-suggest')" onkeydown="if(isPlainEnterKey(event,this)){event.preventDefault();addWatchPersonFromInput('cast');}">
         <button type="button" class="btn-icon" onclick="addWatchPersonFromInput('cast')" title="出演者を追加">＋</button>
       </div>
       <div id="w-cast-warn" class="person-chip-warn"></div>
@@ -198,7 +198,7 @@
       <label>🎬 監督・脚本・スタッフ <span id="w-staff-count"></span></label>
       <div id="w-staff-chips" class="person-chips-wrap"></div>
       <div class="loc-row">
-        <input id="w-staff-input" placeholder="名前を入力して Enter / ＋（カンマ区切り一括追加可）" onfocus="showWatchChipSuggestions('staff')" oninput="showWatchChipSuggestions('staff')" onblur="hideWatchTagSuggestions('w-staff-suggest')" onkeydown="if(event.key==='Enter'){event.preventDefault();addWatchPersonFromInput('staff');}">
+        <input id="w-staff-input" placeholder="名前を入力して Enter / ＋（カンマ区切り一括追加可）" onfocus="showWatchChipSuggestions('staff')" oninput="showWatchChipSuggestions('staff')" onblur="hideWatchTagSuggestions('w-staff-suggest')" onkeydown="if(isPlainEnterKey(event,this)){event.preventDefault();addWatchPersonFromInput('staff');}">
         <button type="button" class="btn-icon" onclick="addWatchPersonFromInput('staff')" title="スタッフを追加">＋</button>
       </div>
       <div id="w-staff-warn" class="person-chip-warn"></div>
@@ -226,7 +226,7 @@
       <label>場所・位置情報（複数スポット追加可）</label>
       <div id="d-loc-chips" class="loc-chips"></div>
       <div class="loc-row">
-        <input id="d-loc" placeholder="場所名を入力して ＋ / 🔍 / 📍" onfocus="showLocationHistory()" oninput="showLocationHistory()" onkeydown="if(event.key==='Enter'){event.preventDefault();addLocationFromInput();}">
+        <input id="d-loc" placeholder="場所名を入力して ＋ / 🔍 / 📍" onfocus="showLocationHistory()" oninput="showLocationHistory()" onkeydown="if(isPlainEnterKey(event,this)){event.preventDefault();addLocationFromInput();}">
         <button type="button" class="btn-icon" onclick="addLocationFromInput()" title="入力した場所を追加">＋</button>
         <button type="button" class="btn-icon" id="btn-loc-gps" onclick="fetchNearbyLocations()" title="現在地から周辺スポットを取得">📍</button>
         <button type="button" class="btn-icon" id="btn-loc-search" onclick="searchLocationByKeyword()" title="キーワードで場所を検索">🔍</button>
@@ -342,7 +342,7 @@
   <div class="modal" style="max-height:88vh;">
     <div class="modal-title"><span>🌐 横断検索（日記＋鑑賞記録・全期間）</span><button class="btn-sm" onclick="closeModals()">✕</button></div>
     <div class="search-row" style="margin-bottom:10px;">
-      <input class="search-input" id="cross-search-input" type="search" placeholder="全期間からキーワード検索..." onkeydown="if(event.key==='Enter'){event.preventDefault();execCrossSearch();}">
+      <input class="search-input" id="cross-search-input" type="search" placeholder="全期間からキーワード検索..." onkeydown="if(isPlainEnterKey(event,this)){event.preventDefault();execCrossSearch();}">
       <button type="button" class="btn-sm primary" onclick="execCrossSearch()">🔍 検索</button>
     </div>
     <div id="cross-search-results" style="max-height:64vh;overflow-y:auto;"></div>

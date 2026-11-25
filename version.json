@@ -1,7 +1,16 @@
 {
-  "version": "v1.36.1",
-  "updatedAt": "2026-11-25T20:45:00+09:00",
+  "version": "v1.36.2",
+  "updatedAt": "2026-11-25T23:16:00+09:00",
   "history": [
+    {
+      "version": "v1.36.2",
+      "date": "2026-11-25",
+      "title": "出演者・スタッフ等のチップ入力欄・検索欄での日本語IME変換確定Enter誤爆を修正",
+      "items": [
+        "isComposing / keyCode===229 に加え、Safari特有の compositionend 直後 Enter を経過時間で抑止する共通IMEガード（isImeComposing / isPlainEnterKey）を導入（3-57）",
+        "出演者・監督スタッフのチップ入力欄、場所ピッカー入力欄（モーダル・インライン）、および日記・鑑賞記録・横断検索の全7箇所のEnterキーハンドラへ一括適用（3-57）"
+      ]
+    },
     {
       "version": "v1.36.1",
       "date": "2026-11-25",

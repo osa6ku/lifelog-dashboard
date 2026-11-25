@@ -483,7 +483,7 @@ function buildDiaryCardHtml(d) {
         <div class="inline-loc-wrap">
           <div id="inline-loc-chips-diary-${rowNum}" class="loc-chips">${inlineLocChipsHtml}</div>
           <div class="inline-loc-row">
-            <input id="inline-loc-input-diary-${rowNum}" placeholder="場所名を入力して ＋ / 📍 / 🔍" onfocus="showInlineDiaryLocSuggestions(${rowNum})" oninput="showInlineDiaryLocSuggestions(${rowNum})" onblur="hideInlineDiaryLocSuggestions(${rowNum})" onkeydown="if(event.key==='Enter'){event.preventDefault();addInlineDiaryLocationFromInput(${rowNum});}">
+            <input id="inline-loc-input-diary-${rowNum}" placeholder="場所名を入力して ＋ / 📍 / 🔍" onfocus="showInlineDiaryLocSuggestions(${rowNum})" oninput="showInlineDiaryLocSuggestions(${rowNum})" onblur="hideInlineDiaryLocSuggestions(${rowNum})" onkeydown="if(isPlainEnterKey(event,this)){event.preventDefault();addInlineDiaryLocationFromInput(${rowNum});}">
             <button type="button" class="btn-sm" onclick="addInlineDiaryLocationFromInput(${rowNum})" title="入力した場所を追加">＋</button>
             <button type="button" class="btn-sm" id="btn-inline-loc-gps-${rowNum}" onclick="fetchInlineNearbyLocations(${rowNum})" title="現在地から近傍スポットを取得">📍</button>
             <button type="button" class="btn-sm" id="btn-inline-loc-search-${rowNum}" onclick="searchInlineLocationByKeyword(${rowNum})" title="キーワードで場所を検索">🔍</button>

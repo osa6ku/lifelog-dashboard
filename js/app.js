@@ -99,8 +99,21 @@ function installNavigationSwipeGuard() {
   }, { passive: false });
 }
 
+let imeTrackerInstalled = false;
+function installImeCompositionTracker() {
+  if (imeTrackerInstalled || typeof document === 'undefined' || typeof document.addEventListener !== 'function') return;
+  imeTrackerInstalled = true;
+  document.addEventListener('compositionstart', (e) => {
+    recordImeCompositionStart(e && e.target);
+  }, true);
+  document.addEventListener('compositionend', (e) => {
+    recordImeCompositionEnd(e && e.target, Date.now());
+  }, true);
+}
+
 window.onload = () => {
   installNavigationSwipeGuard();
+  installImeCompositionTracker();
   const today = getLocalTodayIso();
   document.getElementById('w-date').value = today;
   document.getElementById('d-date').value = today;

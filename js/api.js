@@ -200,6 +200,53 @@ function getLocalNowTimeHm(now = new Date()) {
   return `${String(dt.getHours()).padStart(2, '0')}:${String(dt.getMinutes()).padStart(2, '0')}`;
 }
 
+// 3-57: 日本語IME変換確定Enter誤爆防止（Safari compositionend直後対策含む）
+const IME_COMPOSITION_END_GUARD_MS = 120;
+const imeCompositionMap = typeof WeakMap !== 'undefined' ? new WeakMap() : null;
+let lastGlobalCompositionEndAt = 0;
+
+function recordImeCompositionStart(target) {
+  if (imeCompositionMap && target && typeof target === 'object') {
+    imeCompositionMap.set(target, { composing: true, endedAt: 0 });
+  }
+}
+
+function recordImeCompositionEnd(target, nowMs = Date.now()) {
+  const ts = Number(nowMs || Date.now());
+  lastGlobalCompositionEndAt = ts;
+  if (imeCompositionMap && target && typeof target === 'object') {
+    imeCompositionMap.set(target, { composing: false, endedAt: ts });
+  }
+}
+
+function isImeComposing(event, inputEl, nowMs = Date.now()) {
+  if (!event) return false;
+  if (event.isComposing === true) return true;
+  if (event.keyCode === 229 || event.which === 229) return true;
+  const now = Number(nowMs || Date.now());
+  const el = inputEl || event.target;
+  if (imeCompositionMap && el && typeof el === 'object') {
+    const state = imeCompositionMap.get(el);
+    if (state) {
+      if (state.composing) return true;
+      if (state.endedAt > 0) {
+        const elapsed = now - state.endedAt;
+        if (elapsed >= 0 && elapsed < IME_COMPOSITION_END_GUARD_MS) return true;
+      }
+    }
+  } else if (lastGlobalCompositionEndAt > 0) {
+    const elapsed = now - lastGlobalCompositionEndAt;
+    if (elapsed >= 0 && elapsed < IME_COMPOSITION_END_GUARD_MS) return true;
+  }
+  return false;
+}
+
+function isPlainEnterKey(event, inputEl, nowMs = Date.now()) {
+  if (!event || event.key !== 'Enter') return false;
+  if (isImeComposing(event, inputEl, nowMs)) return false;
+  return true;
+}
+
 
 function highlightElement(el) {
   if (!el) return;
