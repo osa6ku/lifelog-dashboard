@@ -154,6 +154,10 @@ async function forceAppUpdate() {
 }
 
 function switchTab(tab) {
+  if (activeDetailView && activeDetailView.type !== tab) {
+    if (activeDetailView.type === 'diary') closeDiaryDetailView(false);
+    else if (activeDetailView.type === 'watch') closeWatchDetailView(false);
+  }
   document.getElementById('view-watch').style.display = tab === 'watch' ? 'block' : 'none';
   document.getElementById('view-diary').style.display = tab === 'diary' ? 'block' : 'none';
   document.getElementById('view-nutrition').style.display = tab === 'nutrition' ? 'block' : 'none';

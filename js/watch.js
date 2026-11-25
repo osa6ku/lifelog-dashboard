@@ -176,7 +176,85 @@ function setPlatFilter(val, el) {
 
 function onWatchCardTap(row, id, event) {
   if (event && event.target && event.target.closest('a, button, select, input, textarea')) return;
-  openEditWatchModal(Number(row), id);
+  openWatchDetailView(Number(row), id);
+}
+
+function renderWatchDetailView(item) {
+  const detailEl = document.getElementById('watch-detail-view');
+  if (!detailEl || !item) return;
+  const bClass = item.status === '進行中' ? 'b-inprog' : item.status === '完了' ? 'b-done' : 'b-todo';
+  const stars = item.rating ? '★'.repeat(Number(item.rating)) : '';
+  const cleanTitle = sanitizeDisplayText(item.title || '');
+  const castList = parsePersonTags(item.cast);
+  const staffList = parsePersonTags(item.staff);
+  const castHtml = castList.length > 0
+    ? `<div class="detail-section"><div class="detail-section-label">👥 出演者（${castList.length}名）</div><div class="detail-person-chips">${castList.map(c => `<span class="person-chip">${esc(c)}</span>`).join('')}</div></div>`
+    : '';
+  const staffHtml = staffList.length > 0
+    ? `<div class="detail-section"><div class="detail-section-label">🎬 監督・スタッフ</div><div class="detail-person-chips">${staffList.map(s => `<span class="person-chip staff">${esc(s)}</span>`).join('')}</div></div>`
+    : '';
+  const summaryHtml = item.summary
+    ? `<div class="detail-section"><div class="detail-section-label">📖 作品概要</div><div class="detail-sub-body">${renderRichText(item.summary)}</div></div>`
+    : '';
+  const memoHtml = `<div class="detail-section"><div class="detail-section-label">📝 感想・メモ</div><div class="detail-body">${item.memo ? renderRichText(item.memo) : '<span style="color:#9ca3af;">（メモなし）</span>'}</div></div>`;
+  const notionHtml = (item.notionUrl && /^https?:\/\//i.test(String(item.notionUrl).trim()))
+    ? `<div class="related-url-row"><a class="related-url-badge" target="_blank" rel="noopener noreferrer" href="${esc(String(item.notionUrl).trim())}" onclick="event.stopPropagation()">🔗 Notion元ページを開く</a></div>`
+    : '';
+  const rowNum = Number(item.row || 0);
+  detailEl.innerHTML = `
+    <div class="detail-topbar">
+      <button type="button" class="btn-sm" onclick="closeWatchDetailView()">← 一覧に戻る</button>
+      <button type="button" class="btn-sm primary" onclick="openEditWatchModal(${rowNum}, '${esc(item.id)}')">✏️ 編集</button>
+    </div>
+    <article class="card detail-card" onclick="onDetailContentTap('watch', ${rowNum}, '${esc(item.id)}', event)">
+      <div class="card-head">
+        <h2 class="detail-title">${esc(cleanTitle)}</h2>
+        <span class="badge ${bClass}">${esc(item.status || '未設定')}</span>
+      </div>
+      <div class="meta-row" style="margin-top:6px;">
+        <span class="tag-pill">${esc(item.category || 'その他')}</span>
+        ${item.watchDate ? `<span>📅 ${esc(item.watchDate)}</span>` : ''}
+        ${item.releaseYear ? `<span>(${esc(item.releaseYear)})</span>` : ''}
+        ${stars ? `<span style="color:#f59e0b;font-weight:700;">${stars}</span>` : ''}
+        ${item.platform ? `<span class="tag-pill">📺 ${esc(item.platform)}</span>` : ''}
+      </div>
+      ${renderRelatedUrlBadges(item.relatedUrl)}
+      ${notionHtml}
+      ${castHtml}
+      ${staffHtml}
+      ${summaryHtml}
+      ${memoHtml}
+      <div class="detail-hint">本文をタップすると編集画面が開きます</div>
+    </article>`;
+}
+
+function openWatchDetailView(row, id, opts = {}) {
+  const item = watchData.find(x => (row && Number(x.row) === Number(row)) || String(x.id) === String(id));
+  if (!item) return;
+  const scrollY = opts.scrollY !== undefined
+    ? Number(opts.scrollY)
+    : (typeof window !== 'undefined' && typeof window.scrollY === 'number' ? window.scrollY : 0);
+  activeDetailView = { type: 'watch', row: Number(item.row || 0), id: String(item.id || ''), scrollY };
+  renderWatchDetailView(item);
+  const listWrap = document.getElementById('watch-list-wrap');
+  const detailEl = document.getElementById('watch-detail-view');
+  if (listWrap) listWrap.style.display = 'none';
+  if (detailEl) detailEl.style.display = 'block';
+  if (typeof window !== 'undefined' && typeof window.scrollTo === 'function') {
+    window.scrollTo(0, 0);
+  }
+}
+
+function closeWatchDetailView(restoreScroll = true) {
+  const savedY = activeDetailView && activeDetailView.type === 'watch' ? Number(activeDetailView.scrollY || 0) : 0;
+  if (activeDetailView && activeDetailView.type === 'watch') activeDetailView = null;
+  const listWrap = document.getElementById('watch-list-wrap');
+  const detailEl = document.getElementById('watch-detail-view');
+  if (detailEl) detailEl.style.display = 'none';
+  if (listWrap) listWrap.style.display = 'block';
+  if (restoreScroll && typeof window !== 'undefined' && typeof window.scrollTo === 'function') {
+    window.scrollTo(0, savedY);
+  }
 }
 
 function normalizePersonKey(name) {
@@ -397,6 +475,7 @@ function renderWatch() {
           ${stars ? `<span style="color:#f59e0b;font-weight:700;">${stars}</span>` : ''}
           ${item.platform ? `<span class="tag-pill">${esc(item.platform)}</span>` : ''}
         </div>
+        ${renderRelatedUrlBadges(item.relatedUrl)}
         ${memoSnippet}
       </div>`;
   }).join('');
@@ -763,6 +842,9 @@ async function submitWatch() {
   watchEditSnapshot = null;
   closeModals(true);
   renderWatch();
+  if (activeDetailView && activeDetailView.type === 'watch' && isEdit) {
+    renderWatchDetailView(optimisticItem);
+  }
   showToast('鑑賞記録を保存中...', 'info', null, 0);
 
   const sendWatch = async () => {
@@ -773,6 +855,10 @@ async function submitWatch() {
       if (idx >= 0) watchData[idx] = res.entry;
       else watchData.unshift(res.entry);
       renderWatch();
+      if (activeDetailView && activeDetailView.type === 'watch' &&
+          (Number(activeDetailView.row) === Number(res.entry.row) || String(activeDetailView.id) === String(res.entry.id))) {
+        renderWatchDetailView(res.entry);
+      }
       showToast('鑑賞記録を保存しました', 'success', null, 2200);
     } catch (err) {
       watchData = snapshot;
@@ -798,6 +884,7 @@ async function deleteCurrentWatch() {
   editingWatch = null;
   watchEditSnapshot = null;
   closeModals(true);
+  if (activeDetailView && activeDetailView.type === 'watch') closeWatchDetailView(false);
   renderWatch();
   showToast('鑑賞記録を削除中...', 'info', null, 0);
 

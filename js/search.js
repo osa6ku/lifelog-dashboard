@@ -310,10 +310,7 @@ async function openCrossSearchResult(type, idx) {
     const pos = sorted.findIndex(d => Number(d.row) === targetRow);
     if (pos >= diaryDisplayLimit) diaryDisplayLimit = pos + 10;
     renderDiary();
-    setTimeout(() => {
-      const cardEl = document.getElementById(`dcard-${targetRow}`);
-      if (cardEl) highlightElement(cardEl);
-    }, 60);
+    openDiaryDetailView(targetRow, entry.id, { scrollY: 0 });
   } else {
     switchTab('watch');
     document.getElementById('watch-search').value = '';
@@ -323,9 +320,7 @@ async function openCrossSearchResult(type, idx) {
     // ステータス・区分・PFフィルタを対象記事が見えるよう自動調整
     if (statusFilter !== 'ALL' && statusFilter !== entry.status) {
       statusFilter = 'ALL';
-      document.querySelectorAll('#status-chips .chip').forEach(c => {
-        c.classList.toggle('active', c.dataset.val === 'ALL');
-      });
+      syncWatchStatusChipsUi();
     }
     catFilter = 'ALL';
     platFilter = 'ALL';
@@ -351,10 +346,7 @@ async function openCrossSearchResult(type, idx) {
     const pos = sorted.findIndex(w => Number(w.row) === targetRow);
     if (pos >= watchDisplayLimit) watchDisplayLimit = pos + 10;
     renderWatch();
-    setTimeout(() => {
-      const cardEl = document.getElementById(`wcard-${targetRow}`);
-      if (cardEl) highlightElement(cardEl);
-    }, 60);
+    openWatchDetailView(targetRow, entry.id, { scrollY: 0 });
   }
 }
 

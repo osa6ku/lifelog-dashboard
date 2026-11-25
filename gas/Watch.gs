@@ -130,6 +130,218 @@ function queryWatchEntries_(params) {
 }
 
 
+function consumeBalancedUrlGas_(str, startIdx, isMarkdown, isAngle) {
+  let i = startIdx;
+  let depth = 0;
+  const len = str.length;
+  while (i < len) {
+    const ch = str[i];
+    if (isAngle) {
+      if (ch === '>' || /\s/.test(ch)) break;
+      i++;
+      continue;
+    }
+    if (/\s/.test(ch)) break;
+    if (!isMarkdown && /[<>"'「」『』【】（）、。]/.test(ch)) break;
+    if (ch === '(') {
+      depth++;
+      i++;
+      continue;
+    }
+    if (ch === ')') {
+      if (depth > 0) {
+        depth--;
+        i++;
+        continue;
+      }
+      break;
+    }
+    i++;
+  }
+  let url = str.slice(startIdx, i);
+  let trail = '';
+  if (!isMarkdown && !isAngle) {
+    while (url.length > 0 && /[.,;:!?、。・）)」』】]$/.test(url)) {
+      const last = url[url.length - 1];
+      if (last === ')') {
+        const opens = (url.match(/\(/g) || []).length;
+        const closes = (url.match(/\)/g) || []).length;
+        if (closes <= opens) break;
+      }
+      trail = last + trail;
+      url = url.slice(0, -1);
+    }
+  }
+  let closed = true;
+  let nextIdx = i;
+  if (isMarkdown) {
+    if (isAngle) {
+      if (str[i] === '>' && str[i + 1] === ')') {
+        closed = true;
+        nextIdx = i + 2;
+      } else if (str[i] === ')') {
+        closed = true;
+        nextIdx = i + 1;
+      } else {
+        closed = false;
+        nextIdx = i;
+      }
+    } else {
+      closed = str[i] === ')';
+      nextIdx = closed ? i + 1 : i;
+    }
+  } else if (isAngle) {
+    closed = str[i] === '>';
+    nextIdx = closed ? i + 1 : i;
+  }
+  return { url, nextIdx, trail, closed };
+}
+
+function parseRelatedUrls_(rawUrl) {
+  const out = [];
+  const seen = new Set();
+  String(rawUrl || '')
+    .split(/[\r\n,]+/)
+    .map(s => s.trim().replace(/\\_/g, '_'))
+    .filter(s => /^https?:\/\//i.test(s))
+    .forEach(u => {
+      if (!seen.has(u)) {
+        seen.add(u);
+        out.push(u);
+      }
+    });
+  return out;
+}
+
+/**
+ * 鑑賞記録のメモ本文から URL（Markdownリンク・<URL>・\[text\](URL)・裸URL）を抽出して
+ * relatedUrl へ重複排除マージし、メモ本文からは日本語を壊さずに URL を除去する（3-54）。
+ */
+function extractUrlsFromWatchMemo_(rawMemo, existingRelatedUrl) {
+  const existingUrls = parseRelatedUrls_(existingRelatedUrl);
+  const mergedSet = new Set(existingUrls);
+  const mergedUrls = existingUrls.slice();
+  const extractedUrls = [];
+
+  const addUrl = (u) => {
+    const clean = String(u || '').replace(/\\_/g, '_').trim();
+    if (!/^https?:\/\//i.test(clean)) return;
+    extractedUrls.push(clean);
+    if (!mergedSet.has(clean)) {
+      mergedSet.add(clean);
+      mergedUrls.push(clean);
+    }
+  };
+
+  const src = String(rawMemo === null || rawMemo === undefined ? '' : rawMemo).replace(/\r\n?/g, '\n');
+  const lines = src.split('\n');
+  const outLines = [];
+  let memoChanged = false;
+
+  // Markdownリンク（\[...\]含む）、山括弧<URL>、裸URLの開始位置を検出
+  const tokenRe = /\\?\[([^\]]*?)\\?\]\(\s*(<)?(https?:\/\/)|<(https?:\/\/)|https?:\/\//g;
+
+  for (let li = 0; li < lines.length; li++) {
+    const line = lines[li];
+    tokenRe.lastIndex = 0;
+    let rebuilt = '';
+    let nonLinkText = '';
+    let lastIdx = 0;
+    let foundOnLine = false;
+    let m;
+
+    while ((m = tokenRe.exec(line)) !== null) {
+      if (m.index < lastIdx) continue;
+      const before = line.slice(lastIdx, m.index);
+      rebuilt += before;
+      nonLinkText += before;
+
+      if (m[1] !== undefined) {
+        // Markdownリンク: [label](URL) or [label](<URL>) or \[label\](URL)
+        const label = m[1].replace(/\\([[\]_])/g, '$1').trim();
+        const isAngle = Boolean(m[2]);
+        const urlStart = m.index + m[0].length - m[3].length;
+        const res = consumeBalancedUrlGas_(line, urlStart, true, isAngle);
+        if (res.closed && res.url) {
+          addUrl(res.url);
+          foundOnLine = true;
+          // 表示テキストがURLそのものでなければ文中保持用に残す
+          const isLabelUrl = /^https?:\/\//i.test(label);
+          if (label && !isLabelUrl) {
+            rebuilt += label;
+          }
+          lastIdx = res.nextIdx;
+          tokenRe.lastIndex = lastIdx;
+        } else {
+          rebuilt += m[0];
+          nonLinkText += m[0];
+          lastIdx = tokenRe.lastIndex;
+        }
+      } else if (m[4] !== undefined) {
+        // 山括弧 <https://...>
+        const urlStart = m.index + 1;
+        const res = consumeBalancedUrlGas_(line, urlStart, false, true);
+        if (res.closed && res.url) {
+          addUrl(res.url);
+          foundOnLine = true;
+          lastIdx = res.nextIdx;
+          tokenRe.lastIndex = lastIdx;
+        } else {
+          rebuilt += m[0];
+          nonLinkText += m[0];
+          lastIdx = tokenRe.lastIndex;
+        }
+      } else {
+        // 裸URL
+        const res = consumeBalancedUrlGas_(line, m.index, false, false);
+        if (res.url) {
+          addUrl(res.url);
+          foundOnLine = true;
+          rebuilt += res.trail;
+          nonLinkText += res.trail;
+          lastIdx = res.nextIdx;
+          tokenRe.lastIndex = lastIdx;
+        } else {
+          rebuilt += m[0];
+          nonLinkText += m[0];
+          lastIdx = tokenRe.lastIndex;
+        }
+      }
+    }
+
+    if (!foundOnLine) {
+      outLines.push(line);
+      continue;
+    }
+
+    memoChanged = true;
+    const tail = line.slice(lastIdx);
+    rebuilt += tail;
+    nonLinkText += tail;
+
+    // 独立行のリンク（リンク/URL以外の実質テキストが無い行）は行ごと削除
+    const residual = nonLinkText.replace(/^[\s　・\-*•:：]+|[\s　:：]+$/g, '');
+    if (!residual) {
+      continue;
+    }
+    const cleanedLine = rebuilt.replace(/[ \t]{2,}/g, ' ').replace(/[ \t]+$/g, '');
+    outLines.push(cleanedLine);
+  }
+
+  const cleanedMemo = memoChanged
+    ? outLines.join('\n').replace(/\n{3,}/g, '\n\n').trim()
+    : src;
+  const mergedRelatedUrl = mergedUrls.join('\n');
+  const relatedChanged = mergedRelatedUrl !== String(existingRelatedUrl || '').trim();
+
+  return {
+    memo: cleanedMemo,
+    relatedUrl: mergedRelatedUrl,
+    extractedUrls,
+    changed: memoChanged || relatedChanged,
+  };
+}
+
 function addWatchEntry(payload) {
   const ss = SpreadsheetApp.openById(WATCH_SS_ID);
   const sheet = ss.getSheetByName(SHEET_NAME);
@@ -137,7 +349,10 @@ function addWatchEntry(payload) {
   const nextId = lastRow >= 2 ? Number(sheet.getRange(lastRow, COL.ID).getValue() || lastRow - 1) + 1 : 1;
 
   const title = sanitizeHtmlText_(payload.title || '');
-  const memo = sanitizeHtmlText_(payload.memo || '');
+  const sanitizedMemo = sanitizeHtmlText_(payload.memo || '');
+  const urlMigrated = extractUrlsFromWatchMemo_(sanitizedMemo, payload.relatedUrl || '');
+  const memo = urlMigrated.memo;
+  const relatedUrl = urlMigrated.relatedUrl;
   const normPlat = normalizePlatforms_(String(payload.platform || ''), `${title} ${memo}`);
   const watchDate = payload.watchDate || Utilities.formatDate(new Date(), 'Asia/Tokyo', 'yyyy-MM-dd');
 
@@ -155,7 +370,7 @@ function addWatchEntry(payload) {
     sanitizeHtmlText_(payload.staff || ''),
     sanitizeHtmlText_(payload.summary || ''),
     memo,
-    payload.relatedUrl || '',
+    relatedUrl,
     '',
   ];
   sheet.appendRow(newRow);
@@ -205,7 +420,12 @@ function updateWatchCard(payload) {
       sheet.getRange(row, COL.RATING).setValue(payload.rating);
     }
     if (payload.memo !== undefined) {
-      sheet.getRange(row, COL.MEMO).setValue(sanitizeHtmlText_(payload.memo));
+      const existingRelated = String(sheet.getRange(row, COL.RELATED_URL).getValue() || '');
+      const urlMigrated = extractUrlsFromWatchMemo_(sanitizeHtmlText_(payload.memo), existingRelated);
+      sheet.getRange(row, COL.MEMO).setValue(urlMigrated.memo);
+      if (urlMigrated.extractedUrls.length > 0) {
+        sheet.getRange(row, COL.RELATED_URL).setValue(urlMigrated.relatedUrl);
+      }
     }
     if (payload.cast !== undefined) {
       sheet.getRange(row, COL.CAST).setValue(sanitizeHtmlText_(payload.cast));
@@ -232,7 +452,18 @@ function updateWatchFull(payload) {
 
     const cur = sheet.getRange(row, 1, 1, 15).getValues()[0];
     const title = payload.title !== undefined ? sanitizeHtmlText_(payload.title) : String(cur[COL.TITLE - 1] || '');
-    const memo = payload.memo !== undefined ? sanitizeHtmlText_(payload.memo) : String(cur[COL.MEMO - 1] || '');
+    const baseRelatedUrl = payload.relatedUrl !== undefined ? String(payload.relatedUrl || '') : String(cur[COL.RELATED_URL - 1] || '');
+    let memo = String(cur[COL.MEMO - 1] || '');
+    let relatedUrl = baseRelatedUrl;
+    let shouldWriteRelatedUrl = payload.relatedUrl !== undefined;
+    if (payload.memo !== undefined) {
+      const urlMigrated = extractUrlsFromWatchMemo_(sanitizeHtmlText_(payload.memo), baseRelatedUrl);
+      memo = urlMigrated.memo;
+      if (urlMigrated.extractedUrls.length > 0 || payload.relatedUrl !== undefined) {
+        relatedUrl = urlMigrated.relatedUrl;
+        shouldWriteRelatedUrl = true;
+      }
+    }
     const rawPlat = payload.platform !== undefined ? String(payload.platform) : String(cur[COL.PLATFORM - 1] || '');
     const normPlat = normalizePlatforms_(rawPlat, `${title} ${memo}`);
     const status = payload.status !== undefined ? String(payload.status) : String(cur[COL.STATUS - 1] || '');
@@ -251,8 +482,8 @@ function updateWatchFull(payload) {
     if (payload.cast !== undefined) sheet.getRange(row, COL.CAST).setValue(sanitizeHtmlText_(payload.cast));
     if (payload.staff !== undefined) sheet.getRange(row, COL.STAFF).setValue(sanitizeHtmlText_(payload.staff));
     if (payload.summary !== undefined) sheet.getRange(row, COL.SUMMARY).setValue(sanitizeHtmlText_(payload.summary));
-    sheet.getRange(row, COL.MEMO).setValue(memo);
-    if (payload.relatedUrl !== undefined) sheet.getRange(row, COL.RELATED_URL).setValue(payload.relatedUrl);
+    if (payload.memo !== undefined) sheet.getRange(row, COL.MEMO).setValue(memo);
+    if (shouldWriteRelatedUrl) sheet.getRange(row, COL.RELATED_URL).setValue(relatedUrl);
     return { notFound: false, sheet, row };
   }, { label: 'updateWatchFull' });
   if (res.notFound) return { ok: false, error: 'Watch entry not found' };

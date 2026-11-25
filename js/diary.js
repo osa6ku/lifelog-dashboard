@@ -312,7 +312,110 @@ function formatDiaryDateLabel(dateStr, weekday) {
 
 function onDiaryCardTap(row, id, event) {
   if (event && event.target && event.target.closest('a, button, select, input, textarea, img, .meal-badge')) return;
-  openEditDiaryModal(Number(row), id);
+  openDiaryDetailView(Number(row), id);
+}
+
+function onDetailContentTap(type, row, id, event) {
+  if (event && event.target && event.target.closest('a, button, select, input, textarea, img, .meal-badge')) return;
+  if (typeof window !== 'undefined' && typeof window.getSelection === 'function') {
+    const sel = String(window.getSelection() || '').trim();
+    if (sel.length > 0) return;
+  }
+  if (type === 'diary') openEditDiaryModal(Number(row), id);
+  else openEditWatchModal(Number(row), id);
+}
+
+function renderDiaryDetailView(d) {
+  const detailEl = document.getElementById('diary-detail-view');
+  if (!detailEl || !d) return;
+  const placeholder = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
+  const ids = d.imageIds || [];
+  const urls = d.imageUrls || [];
+  const locs = normalizeDiaryLocations(d);
+  const coordLocs = locs.filter(l => l.lat !== null && l.lng !== null);
+  let mapLinkHtml = '';
+  if (coordLocs.length === 1) {
+    mapLinkHtml = `<a class="loc-badge" style="background:#ecfdf5;color:#047857;border-color:#a7f3d0;" target="_blank" rel="noopener" href="https://www.google.com/maps/search/?api=1&query=${coordLocs[0].lat},${coordLocs[0].lng}">🗺️ Googleマップで開く</a>`;
+  } else if (coordLocs.length >= 2) {
+    const dirPath = coordLocs.map(l => `${l.lat},${l.lng}`).join('/');
+    mapLinkHtml = `<a class="loc-badge" style="background:#ecfdf5;color:#047857;border-color:#a7f3d0;" target="_blank" rel="noopener" href="https://www.google.com/maps/dir/${dirPath}">🗺️ Googleマップで経路を開く (${coordLocs.length}地点)</a>`;
+  }
+  const locHtml = locs.length > 0
+    ? `<div class="meta-row">${locs.map(l => {
+        const hasCoord = l.lat !== null && l.lng !== null;
+        const href = hasCoord
+          ? `https://www.google.com/maps/search/?api=1&query=${l.lat},${l.lng}`
+          : `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(l.name)}`;
+        return `<a class="loc-badge" target="_blank" rel="noopener" href="${href}">📍 ${esc(l.name)}</a>`;
+      }).join('')}${mapLinkHtml}</div>`
+    : '';
+  const mediaHtml = ids.length > 0
+    ? `<div class="thumb-strip allow-x-scroll">${ids.map((fid, i) => `<img class="thumb-img" data-file-id="${esc(fid)}" src="${(thumbMemCache[fid] || placeholder)}" alt="写真${i + 1}" onclick="event.stopPropagation(); openImagePreview('${esc(fid)}','${esc(urls[i] || '')}')">`).join('')}</div>`
+    : (urls.length > 0 ? `<div class="meta-row" style="margin-top:8px;">${urls.map((u, i) => `<a class="q-link" target="_blank" href="${esc(u)}">📷 写真${i + 1}</a>`).join('')}</div>` : '');
+
+  const dayMeals = mealData.filter(m => m.date === d.date).sort((a, b) => (MEAL_ORDER[a.mealType] || 9) - (MEAL_ORDER[b.mealType] || 9));
+  let mealHtml = '';
+  if (dayMeals.length > 0) {
+    const sumK = dayMeals.reduce((s, m) => s + Number(m.calories || 0), 0);
+    const mealPills = dayMeals.map(m => `<span class="meal-badge" style="cursor:pointer;" onclick="event.stopPropagation(); goToMealDate('${esc(d.date)}')">${esc(m.mealType)}: ${esc(m.dishName)}${m.calories ? ` (${esc(m.calories)}kcal)` : ''}</span>`).join(' ');
+    mealHtml = `<div style="margin-top:10px;"><button type="button" class="btn-sm success" onclick="event.stopPropagation(); goToMealDate('${esc(d.date)}')">🍽️ 食事記録へ (${dayMeals.length}食${sumK ? ` / 計${sumK}kcal` : ''}) ›</button><div style="margin-top:4px;">${mealPills}</div></div>`;
+  } else {
+    const hasMeal = d.calories !== '' && d.calories !== undefined && d.calories !== null;
+    if (d.mealType || hasMeal || d.nutritionAdvice) {
+      mealHtml = `<div class="meal-badge" style="margin-top:10px;">🍽️ ${esc(d.mealType || '食事')}${hasMeal ? ` ・ ${esc(d.calories)} kcal` : ''}</div>${d.nutritionAdvice ? `<div class="card-cast">💡 ${esc(d.nutritionAdvice)}</div>` : ''}`;
+    }
+  }
+  const timeLabel = d.time ? ` ${d.time}` : '';
+  const rowNum = Number(d.row || 0);
+  detailEl.innerHTML = `
+    <div class="detail-topbar">
+      <button type="button" class="btn-sm" onclick="closeDiaryDetailView()">← 一覧に戻る</button>
+      <button type="button" class="btn-sm primary" onclick="openEditDiaryModal(${rowNum}, '${esc(d.id)}')">✏️ 編集</button>
+    </div>
+    <article class="card detail-card" onclick="onDetailContentTap('diary', ${rowNum}, '${esc(d.id)}', event)">
+      <div class="card-date">${esc(formatDiaryDateLabel(d.date, d.weekday))}${esc(timeLabel)}</div>
+      ${d.title ? `<h2 class="detail-title">${esc(sanitizeDisplayText(d.title))}</h2>` : ''}
+      ${locHtml}
+      ${mediaHtml}
+      <div class="detail-body">${d.body ? renderRichText(d.body) : '<span style="color:#9ca3af;">（本文なし）</span>'}</div>
+      ${mealHtml}
+      <div class="detail-hint">本文をタップすると編集画面が開きます</div>
+    </article>`;
+  ensureThumbObserver();
+  if (typeof detailEl.querySelectorAll === 'function') {
+    detailEl.querySelectorAll('img.thumb-img[data-file-id]').forEach(img => {
+      if (!thumbMemCache[img.dataset.fileId]) thumbObserver.observe(img);
+    });
+  }
+}
+
+function openDiaryDetailView(row, id, opts = {}) {
+  const entry = diaryData.find(x => (row && Number(x.row) === Number(row)) || String(x.id) === String(id));
+  if (!entry) return;
+  const scrollY = opts.scrollY !== undefined
+    ? Number(opts.scrollY)
+    : (typeof window !== 'undefined' && typeof window.scrollY === 'number' ? window.scrollY : 0);
+  activeDetailView = { type: 'diary', row: Number(entry.row || 0), id: String(entry.id || ''), scrollY };
+  renderDiaryDetailView(entry);
+  const listWrap = document.getElementById('diary-list-wrap');
+  const detailEl = document.getElementById('diary-detail-view');
+  if (listWrap) listWrap.style.display = 'none';
+  if (detailEl) detailEl.style.display = 'block';
+  if (typeof window !== 'undefined' && typeof window.scrollTo === 'function') {
+    window.scrollTo(0, 0);
+  }
+}
+
+function closeDiaryDetailView(restoreScroll = true) {
+  const savedY = activeDetailView && activeDetailView.type === 'diary' ? Number(activeDetailView.scrollY || 0) : 0;
+  if (activeDetailView && activeDetailView.type === 'diary') activeDetailView = null;
+  const listWrap = document.getElementById('diary-list-wrap');
+  const detailEl = document.getElementById('diary-detail-view');
+  if (detailEl) detailEl.style.display = 'none';
+  if (listWrap) listWrap.style.display = 'block';
+  if (restoreScroll && typeof window !== 'undefined' && typeof window.scrollTo === 'function') {
+    window.scrollTo(0, savedY);
+  }
 }
 
 function captureDiaryModalState() {
@@ -686,6 +789,9 @@ async function submitDiary() {
   diaryEditSnapshot = null;
   closeModals(true);
   renderDiary();
+  if (activeDetailView && activeDetailView.type === 'diary' && isEdit) {
+    renderDiaryDetailView(optimisticItem);
+  }
   if (document.getElementById('view-nutrition').style.display !== 'none') renderNutritionView();
   showToast('日記を保存中...', 'info', null, 0);
 
@@ -702,6 +808,10 @@ async function submitDiary() {
         if (idx >= 0) diaryData[idx] = res.entry;
         else diaryData.unshift(res.entry);
         renderDiary();
+        if (activeDetailView && activeDetailView.type === 'diary' &&
+            (Number(activeDetailView.row) === Number(res.entry.row) || String(activeDetailView.id) === String(res.entry.id))) {
+          renderDiaryDetailView(res.entry);
+        }
         if (document.getElementById('view-nutrition').style.display !== 'none') renderNutritionView();
       }
       showToast('保存しました', 'success', null, 2000);
@@ -733,6 +843,7 @@ async function deleteCurrentDiary() {
   editingDiary = null;
   diaryEditSnapshot = null;
   closeModals(true);
+  if (activeDetailView && activeDetailView.type === 'diary') closeDiaryDetailView(false);
   renderDiary();
   if (document.getElementById('view-nutrition').style.display !== 'none') renderNutritionView();
   showToast('日記を削除中...', 'info', null, 0);

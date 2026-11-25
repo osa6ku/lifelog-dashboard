@@ -6,6 +6,7 @@ function onOpen() {
     .addSeparator()
     .addItem('プラットフォーム表記揺れを正規化（全行）', 'normalizeAllPlatforms')
     .addItem('🧹 鑑賞記録DBのHTMLタグ残骸を一括クレンジング（バックアップ付）', 'cleanseWatchHtmlTags')
+    .addItem('🔗 鑑賞記録DBのメモ内URLを関連URL欄へ一括移管（バックアップ付）', 'migrateWatchMemoUrls')
     .addSeparator()
     .addItem('🌙 年別Doc深夜バッチ同期を設定（毎日3時）', 'installNightlyDocSyncTrigger')
     .addItem('📄 変更のあった年別Docを今すぐ同期', 'syncDirtyDiaryDocsNightly')
@@ -90,6 +91,73 @@ function cleanseWatchHtmlTags() {
     updatedRows,
   };
   Logger.log('cleanseWatchHtmlTags: ' + JSON.stringify(summary));
+  return summary;
+}
+
+/**
+ * 鑑賞記録DBの感想・メモ内に残存するURLを関連URL欄へ一括移管・メモから一掃するワンタイム関数（3-54）。
+ * 実行前に同スプレッドシート内へ全件バックアップシートを複製保存する。
+ */
+function migrateWatchMemoUrls() {
+  const ss = SpreadsheetApp.openById(WATCH_SS_ID);
+  const sheet = ss.getSheetByName(SHEET_NAME);
+  if (!sheet) return { ok: false, error: 'Sheet not found: ' + SHEET_NAME };
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 2) {
+    return { ok: true, totalRows: 0, beforeUrlMemoRows: 0, afterUrlMemoRows: 0, updatedRows: 0, migratedUrlCount: 0 };
+  }
+
+  const ts = Utilities.formatDate(new Date(), 'Asia/Tokyo', 'yyyyMMdd_HHmm');
+  const backupSheetName = `${SHEET_NAME}_url_backup_${ts}`;
+  const backupSheet = sheet.copyTo(ss);
+  backupSheet.setName(backupSheetName);
+
+  const lastCol = Math.max(15, sheet.getLastColumn());
+  const dataRange = sheet.getRange(2, 1, lastRow - 1, lastCol);
+  const rows = dataRange.getValues();
+  const urlRe = /https?:\/\//i;
+
+  let beforeUrlMemoRows = 0;
+  let afterUrlMemoRows = 0;
+  let updatedRows = 0;
+  let migratedUrlCount = 0;
+  const origIds = rows.map(r => String(r[COL.ID - 1] || ''));
+  const origStatuses = rows.map(r => String(r[COL.STATUS - 1] || ''));
+
+  const nextRows = rows.map(r => {
+    const next = r.slice();
+    const origMemo = String(next[COL.MEMO - 1] === null || next[COL.MEMO - 1] === undefined ? '' : next[COL.MEMO - 1]);
+    const origRelated = String(next[COL.RELATED_URL - 1] === null || next[COL.RELATED_URL - 1] === undefined ? '' : next[COL.RELATED_URL - 1]);
+    if (urlRe.test(origMemo)) beforeUrlMemoRows++;
+
+    const res = extractUrlsFromWatchMemo_(origMemo, origRelated);
+    if (res.extractedUrls.length > 0) {
+      next[COL.MEMO - 1] = res.memo;
+      next[COL.RELATED_URL - 1] = res.relatedUrl;
+      updatedRows++;
+      migratedUrlCount += res.extractedUrls.length;
+    }
+    if (urlRe.test(String(next[COL.MEMO - 1] || ''))) afterUrlMemoRows++;
+    return next;
+  });
+
+  if (updatedRows > 0) {
+    dataRange.setValues(nextRows);
+  }
+  const invariantsOk = nextRows.length === rows.length &&
+    nextRows.every((r, idx) => String(r[COL.ID - 1] || '') === origIds[idx] && String(r[COL.STATUS - 1] || '') === origStatuses[idx]);
+
+  const summary = {
+    ok: true,
+    backupSheetName,
+    totalRows: rows.length,
+    beforeUrlMemoRows,
+    afterUrlMemoRows,
+    updatedRows,
+    migratedUrlCount,
+    invariantsOk,
+  };
+  Logger.log('migrateWatchMemoUrls: ' + JSON.stringify(summary));
   return summary;
 }
 
