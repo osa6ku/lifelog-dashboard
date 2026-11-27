@@ -1,5 +1,6 @@
-const APP_VERSION = 'v1.38.0';
+const APP_VERSION = 'v1.39.0';
 const DEFAULT_RELEASE_NOTES = [
+  { version: 'v1.39.0', date: '2026-11-27', title: '鑑賞記録のタグ検索機能（トークン完全一致・タグピッカー・人物チップ逆引き）', items: ['?api=watch に出演者（castTag）・監督スタッフ（staffTag）のトークン完全一致＆複数タグAND検索を追加し、タグマスター件数と100%一致・部分一致ノイズゼロを実現（3-60）', '鑑賞記録タブに「🏷️ タグ」検索ピッカー（配信済みマスター活用・件数降順表示・インクリメンタル絞り込み＋3-57共通IMEガード・複数タグAND選択・適用中タグバー＆ワンタップ解除・ステータス自動全対象＆復帰）を追加（3-60）', '1記事閲覧画面の出演者・監督スタッフチップをタップ可能化し、編集誤遷移を防ぎつつワンタップで該当人物の作品一覧へ逆引き絞り込みできる導線を実装（3-60）'] },
   { version: 'v1.38.0', date: '2026-11-27', title: 'Wikipedia補完の候補収集強化（曖昧さ回避展開・メモ人名ヒント抽出・モーダル再検索欄）', items: ['曖昧さ回避ページ（タイトル / タイトル (曖昧さ回避)）の内部リンクから「タイトル (〇〇)」形式の作品記事候補（最大15件）を展開・収集する処理を追加（3-59）', '感想・メモ本文からDB既登録スタッフ・出演者名を自動抽出する人名ヒント補助検索（スタッフ優先・最長一致・最大2名・一般語/短英字除外の辞書衛生ガード付）および早期終了＋追加APIコール上限（最大6回）を実装（3-59）', 'Wikipedia候補プレビューモーダルへ任意のヒント語を入力して再検索できる入力欄＋「🔍 再検索」ボタン（3-57共通IMEガード適用・0件時継続再検索・extraHint API連携）を追加（3-59）'] },
   { version: 'v1.37.0', date: '2026-11-27', title: '鑑賞記録のWikipedia補完精度向上・英語原題対応＆候補プレビュー選択UI', items: ['クエリ前処理（話数メモ・上下巻・英題括弧・記号揺れ除去）・厳格なタイトル一致ガード（公式リダイレクト許容／別作品除外）・英語原題の英語版Wikipedia＋日本語版langlinks優先取得を実装（3-58）', '関連URLのWikipediaリンク最優先取得、監督スタッフ・出演者・感想メモ・鑑賞年による候補スコアリング、およびシリーズ該当年優先・原作年除外・抽出年＞鑑賞年の不採用＆警告表示を実装（3-58）', 'PWAに「🌐 Wikipedia補完」候補プレビュー選択モーダル（空欄のみ補完／概要・公開年上書き再補完の切替、採用Wikipedia URLの関連URL重複排除マージ、感想メモ・ステータス等の完全保護）を追加（3-58）'] },
   { version: 'v1.36.2', date: '2026-11-25', title: '出演者・スタッフ等のチップ入力欄・検索欄での日本語IME変換確定Enter誤爆を修正', items: ['isComposing / keyCode===229 に加え、Safari特有の compositionend 直後 Enter を経過時間で抑止する共通IMEガード（isImeComposing / isPlainEnterKey）を導入（3-57）', '出演者・監督スタッフのチップ入力欄、場所ピッカー入力欄（モーダル・インライン）、および日記・鑑賞記録・横断検索の全7箇所のEnterキーハンドラへ一括適用（3-57）'] },
@@ -91,6 +92,9 @@ let watchStatusBeforeSearch = null;
 let watchLastSearchQuery = '';
 let serverWatchCastTags = [];
 let serverWatchStaffTags = [];
+let watchSelectedCastTags = [];
+let watchSelectedStaffTags = [];
+let watchTagPickerTab = 'cast';
 
 
 let crossSearchState = {

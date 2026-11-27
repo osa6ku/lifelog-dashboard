@@ -6,25 +6,32 @@ function syncWatchStatusChipsUi() {
   if (sel) sel.value = statusFilter;
 }
 
+function hasActiveWatchTags() {
+  return watchSelectedCastTags.length > 0 || watchSelectedStaffTags.length > 0;
+}
+
 async function loadWatchData(opts = {}) {
   const q = document.getElementById('watch-search').value.trim();
   const sort = document.getElementById('watch-sort').value || 'desc';
   const ym = watchPeriodFilter;
   const offset = Number(opts.offset || 0);
   const append = Boolean(opts.append);
+  const hasTags = hasActiveWatchTags();
+  const hasQueryOrTags = Boolean(q) || hasTags;
+  const currentQueryKey = `${q}||C:${watchSelectedCastTags.join(',')}||S:${watchSelectedStaffTags.join(',')}`;
 
   if (!append) {
-    if (q) {
+    if (hasQueryOrTags) {
       if (!watchSearchActive) {
         watchStatusBeforeSearch = statusFilter;
         watchSearchActive = true;
-        watchLastSearchQuery = q;
+        watchLastSearchQuery = currentQueryKey;
         if (!opts.fromStatusChip && statusFilter !== 'ALL') {
           statusFilter = 'ALL';
           syncWatchStatusChipsUi();
         }
-      } else if (!opts.fromStatusChip && q !== watchLastSearchQuery) {
-        watchLastSearchQuery = q;
+      } else if (!opts.fromStatusChip && currentQueryKey !== watchLastSearchQuery) {
+        watchLastSearchQuery = currentQueryKey;
         if (statusFilter !== 'ALL') {
           statusFilter = 'ALL';
           syncWatchStatusChipsUi();
@@ -39,7 +46,7 @@ async function loadWatchData(opts = {}) {
     }
   }
 
-  const isDefault = !q && !ym && sort === 'desc' && statusFilter === '進行中' && catFilter === 'ALL' && platFilter === 'ALL';
+  const isDefault = !q && !hasTags && !ym && sort === 'desc' && statusFilter === '進行中' && catFilter === 'ALL' && platFilter === 'ALL';
 
   const params = {
     api: 'watch',
@@ -48,6 +55,8 @@ async function loadWatchData(opts = {}) {
     offset: String(offset),
   };
   if (q) params.q = q;
+  if (watchSelectedCastTags.length > 0) params.castTag = watchSelectedCastTags.join(',');
+  if (watchSelectedStaffTags.length > 0) params.staffTag = watchSelectedStaffTags.join(',');
   if (ym) params.ym = ym;
   if (isDefault && offset === 0) {
     params.includeInProgress = '1';
@@ -58,6 +67,7 @@ async function loadWatchData(opts = {}) {
   }
   if (serverWatchCastTags.length === 0) params.includeMeta = '1';
 
+  renderActiveWatchTagBar();
   updatePeriodUi('watch', ym, q, sort);
   if (!append) {
     document.getElementById('watch-list').innerHTML = '<div class="loading">鑑賞記録を読み込んでいます...</div>';
@@ -132,6 +142,9 @@ function resetWatchQuery() {
   document.getElementById('watch-search').value = '';
   document.getElementById('watch-sort').value = 'desc';
   watchPeriodFilter = '';
+  watchSelectedCastTags = [];
+  watchSelectedStaffTags = [];
+  renderActiveWatchTagBar();
   runWatchServerQuery();
 }
 
@@ -188,10 +201,10 @@ function renderWatchDetailView(item) {
   const castList = parsePersonTags(item.cast);
   const staffList = parsePersonTags(item.staff);
   const castHtml = castList.length > 0
-    ? `<div class="detail-section"><div class="detail-section-label">👥 出演者（${castList.length}名）</div><div class="detail-person-chips">${castList.map(c => `<span class="person-chip">${esc(c)}</span>`).join('')}</div></div>`
+    ? `<div class="detail-section"><div class="detail-section-label">👥 出演者（${castList.length}名・タップで共演作を検索）</div><div class="detail-person-chips">${castList.map(c => `<button type="button" class="person-chip clickable" data-tag-type="cast" data-tag-name="${esc(c)}" onclick="event.stopPropagation(); onWatchPersonChipTap(this)">${esc(c)}</button>`).join('')}</div></div>`
     : '';
   const staffHtml = staffList.length > 0
-    ? `<div class="detail-section"><div class="detail-section-label">🎬 監督・スタッフ</div><div class="detail-person-chips">${staffList.map(s => `<span class="person-chip staff">${esc(s)}</span>`).join('')}</div></div>`
+    ? `<div class="detail-section"><div class="detail-section-label">🎬 監督・スタッフ（タップで作品を検索）</div><div class="detail-person-chips">${staffList.map(s => `<button type="button" class="person-chip staff clickable" data-tag-type="staff" data-tag-name="${esc(s)}" onclick="event.stopPropagation(); onWatchPersonChipTap(this)">${esc(s)}</button>`).join('')}</div></div>`
     : '';
   const summaryHtml = item.summary
     ? `<div class="detail-section"><div class="detail-section-label">📖 作品概要</div><div class="detail-sub-body">${renderRichText(item.summary)}</div></div>`
@@ -1122,5 +1135,144 @@ async function confirmApplyWikiCandidate(index) {
     showToast(`Wikipedia反映失敗: ${err.message || err}`, 'error', null, 5000);
   }
 }
+
+// ============================================================
+// 3-60: 鑑賞記録のタグ検索ピッカー・適用中タグバー・人物チップ逆引き
+// ============================================================
+function getWatchTagMasterList(type) {
+  return type === 'staff'
+    ? (Array.isArray(serverWatchStaffTags) ? serverWatchStaffTags : [])
+    : (Array.isArray(serverWatchCastTags) ? serverWatchCastTags : []);
+}
+
+function renderActiveWatchTagBar() {
+  const bar = document.getElementById('watch-active-tags-bar');
+  const modalSelected = document.getElementById('watch-tag-picker-selected');
+  const toolbarBtn = document.getElementById('btn-watch-tags');
+  const active = hasActiveWatchTags();
+  if (toolbarBtn) toolbarBtn.classList.toggle('tag-active', active);
+
+  const chipsHtml = [
+    ...watchSelectedCastTags.map(name => `<button type="button" class="active-tag-chip" data-tag-type="cast" data-tag-name="${esc(name)}" onclick="onActiveWatchTagChipTap(this)" title="${esc(name)}を解除">👥 ${esc(name)} ×</button>`),
+    ...watchSelectedStaffTags.map(name => `<button type="button" class="active-tag-chip staff" data-tag-type="staff" data-tag-name="${esc(name)}" onclick="onActiveWatchTagChipTap(this)" title="${esc(name)}を解除">🎬 ${esc(name)} ×</button>`),
+  ].join('');
+
+  if (bar) {
+    if (!active) {
+      bar.style.display = 'none';
+      bar.innerHTML = '';
+    } else {
+      bar.style.display = 'flex';
+      bar.innerHTML = `${chipsHtml}<button type="button" class="btn-sm" onclick="openWatchTagPickerModal()">＋ タグ追加</button><button type="button" class="btn-sm" onclick="clearWatchTagFilters()">✕ 解除</button>`;
+    }
+  }
+  if (modalSelected) {
+    if (!active) {
+      modalSelected.style.display = 'none';
+      modalSelected.innerHTML = '';
+    } else {
+      modalSelected.style.display = 'flex';
+      modalSelected.innerHTML = `<span style="font-size:11.5px;font-weight:700;color:#1d4ed8;">適用中(AND):</span>${chipsHtml}`;
+    }
+  }
+}
+
+function setWatchTagPickerTab(tab) {
+  watchTagPickerTab = tab === 'staff' ? 'staff' : 'cast';
+  const castTab = document.getElementById('watch-tag-tab-cast');
+  const staffTab = document.getElementById('watch-tag-tab-staff');
+  if (castTab) castTab.classList.toggle('active', watchTagPickerTab === 'cast');
+  if (staffTab) staffTab.classList.toggle('active', watchTagPickerTab === 'staff');
+  renderWatchTagPickerList();
+}
+
+function renderWatchTagPickerList() {
+  const listEl = document.getElementById('watch-tag-picker-list');
+  if (!listEl) return;
+  const inputEl = document.getElementById('watch-tag-filter-input');
+  const filterQ = inputEl ? String(inputEl.value || '').trim().toLowerCase() : '';
+  const master = getWatchTagMasterList(watchTagPickerTab);
+  const selectedArr = watchTagPickerTab === 'staff' ? watchSelectedStaffTags : watchSelectedCastTags;
+
+  const filtered = filterQ
+    ? master.filter(t => String(t.name || '').toLowerCase().includes(filterQ))
+    : master.slice(0, 50);
+
+  if (filtered.length === 0) {
+    listEl.innerHTML = `<div class="wiki-empty" style="width:100%;">${master.length === 0 ? 'タグ一覧を読み込み中です...' : '該当するタグが見つかりませんでした'}</div>`;
+    return;
+  }
+
+  const clsBase = watchTagPickerTab === 'staff' ? 'tag-picker-item staff' : 'tag-picker-item';
+  listEl.innerHTML = filtered.map(t => {
+    const isSel = selectedArr.includes(t.name);
+    return `<button type="button" class="${clsBase}${isSel ? ' selected' : ''}" data-tag-type="${watchTagPickerTab}" data-tag-name="${esc(t.name)}" onclick="onWatchTagPickerItemTap(this)"><span>${esc(t.name)}</span><span class="tag-picker-count">(${Number(t.count || 0)})</span></button>`;
+  }).join('');
+}
+
+function openWatchTagPickerModal() {
+  const inputEl = document.getElementById('watch-tag-filter-input');
+  if (inputEl) inputEl.value = '';
+  setWatchTagPickerTab(watchTagPickerTab);
+  renderActiveWatchTagBar();
+  const modal = document.getElementById('modal-watch-tags');
+  if (modal) modal.classList.add('open');
+}
+
+function closeWatchTagPickerModal() {
+  const modal = document.getElementById('modal-watch-tags');
+  if (modal) modal.classList.remove('open');
+}
+
+function toggleWatchTagFilter(type, name) {
+  const tagName = String(name || '').trim();
+  if (!tagName) return;
+  const list = type === 'staff' ? watchSelectedStaffTags : watchSelectedCastTags;
+  const idx = list.indexOf(tagName);
+  if (idx >= 0) {
+    list.splice(idx, 1);
+  } else {
+    list.push(tagName);
+  }
+  renderActiveWatchTagBar();
+  renderWatchTagPickerList();
+  return runWatchServerQuery();
+}
+
+function onWatchTagPickerItemTap(el) {
+  if (!el || !el.dataset) return;
+  return toggleWatchTagFilter(el.dataset.tagType || 'cast', el.dataset.tagName || '');
+}
+
+function onActiveWatchTagChipTap(el) {
+  if (!el || !el.dataset) return;
+  return toggleWatchTagFilter(el.dataset.tagType || 'cast', el.dataset.tagName || '');
+}
+
+function clearWatchTagFilters() {
+  watchSelectedCastTags = [];
+  watchSelectedStaffTags = [];
+  renderActiveWatchTagBar();
+  renderWatchTagPickerList();
+  return runWatchServerQuery();
+}
+
+function searchWatchByPersonChip(type, name) {
+  const tagName = String(name || '').trim();
+  if (!tagName) return;
+  watchSelectedCastTags = type === 'cast' ? [tagName] : [];
+  watchSelectedStaffTags = type === 'staff' ? [tagName] : [];
+  if (activeDetailView && activeDetailView.type === 'watch') {
+    closeWatchDetailView(false);
+  }
+  renderActiveWatchTagBar();
+  return runWatchServerQuery();
+}
+
+function onWatchPersonChipTap(el) {
+  if (!el || !el.dataset) return;
+  return searchWatchByPersonChip(el.dataset.tagType || 'cast', el.dataset.tagName || '');
+}
+
 
 

@@ -9,7 +9,7 @@
   <link rel="manifest" href="./manifest.json">
   <link rel="apple-touch-icon" href="./apple-touch-icon.png">
   <link rel="icon" type="image/png" href="./icon-192.png">
-  <title>ライフログ・ダッシュボード v1.38.0</title>
+  <title>ライフログ・ダッシュボード v1.39.0</title>
   <link rel="stylesheet" href="./css/style.css">
 </head>
 <body>
@@ -17,7 +17,7 @@
   <div class="header-top">
     <h1 class="app-title">📚 ライフログ・ダッシュボード</h1>
     <div class="header-right">
-      <button type="button" class="ver-badge" id="app-version" onclick="openReleaseNotesModal()" title="変更履歴（リリースノート）を表示">📋 v1.38.0</button>
+      <button type="button" class="ver-badge" id="app-version" onclick="openReleaseNotesModal()" title="変更履歴（リリースノート）を表示">📋 v1.39.0</button>
       <button class="btn-sm" id="btn-check-update" onclick="manualCheckUpdate()" title="最新バージョン確認・更新">🔄 更新</button>
     </div>
   </div>
@@ -67,12 +67,14 @@
         <option value="asc">古順</option>
         <option value="rating_desc">評価</option>
       </select>
+      <button type="button" class="toolbar-btn" id="btn-watch-tags" onclick="openWatchTagPickerModal()" title="出演者・監督スタッフのタグで絞り込み">🏷️</button>
       <button type="button" class="toolbar-btn" id="btn-watch-tools" onclick="toggleListToolsDrawer('watch')" title="検索・月指定・詳細絞り込み" aria-expanded="false">🔍</button>
     </div>
     <div class="list-tools-drawer" id="watch-tools-drawer">
       <div class="search-row">
         <input class="search-input" id="watch-search" type="search" placeholder="タイトル・出演者・スタッフ・メモを検索..." oninput="onWatchSearchInput()" onsearch="onWatchSearchInput()" onkeydown="if(isPlainEnterKey(event,this)){event.preventDefault();runWatchServerQuery();}">
         <button type="button" class="btn-sm primary" onclick="runWatchServerQuery()" title="全期間からサーバー検索">🔍</button>
+        <button type="button" class="btn-sm" onclick="openWatchTagPickerModal()" title="出演者・監督スタッフのタグから絞り込む">🏷️ タグ</button>
         <button type="button" class="btn-sm" onclick="openCrossSearch(document.getElementById('watch-search').value)" title="日記＋鑑賞記録を横断検索">🌐</button>
       </div>
       <div class="period-nav">
@@ -98,6 +100,7 @@
         <button class="chip" data-val="映画館" onclick="setPlatFilter('映画館', this)">映画館</button>
       </div>
     </div>
+    <div id="watch-active-tags-bar" class="active-tags-bar" style="display:none;"></div>
     <div class="count-bar" id="watch-count">読み込み中...</div>
     <div id="watch-list"><div class="loading">鑑賞記録を読み込んでいます...</div></div>
     <div id="watch-more-wrap" style="text-align:center;margin:12px 0;display:none;">
@@ -212,6 +215,28 @@
     <button type="button" class="btn-big" id="btn-watch-wiki-preview" style="display:none;width:100%;margin-bottom:8px;background:#0284c7;" onclick="openWikiPreviewForEditingWatch()">🌐 Wikipedia補完（候補プレビュー）</button>
     <button class="btn-big btn-watch" style="width:100%;" id="btn-save-watch" onclick="submitWatch()">保存する</button>
     <button class="btn-danger" id="btn-delete-watch" style="display:none;" onclick="deleteCurrentWatch()">🗑️ この鑑賞記録を削除</button>
+  </div>
+</div>
+
+<div class="modal-backdrop" id="modal-watch-tags" onclick="if(event.target===this) closeWatchTagPickerModal()">
+  <div class="modal" style="max-height:86vh;display:flex;flex-direction:column;">
+    <div class="modal-title">
+      <span>🏷️ タグで絞り込み（AND検索）</span>
+      <button type="button" class="btn-sm" onclick="closeWatchTagPickerModal()">✕</button>
+    </div>
+    <div class="wiki-mode-bar" id="watch-tag-picker-tabs">
+      <button type="button" class="wiki-mode-btn active" id="watch-tag-tab-cast" onclick="setWatchTagPickerTab('cast')">👥 出演者</button>
+      <button type="button" class="wiki-mode-btn" id="watch-tag-tab-staff" onclick="setWatchTagPickerTab('staff')">🎬 監督・スタッフ</button>
+    </div>
+    <div class="wiki-hint-search-bar">
+      <input type="search" id="watch-tag-filter-input" class="search-input" placeholder="タグ名で絞り込み..." oninput="renderWatchTagPickerList()" onsearch="renderWatchTagPickerList()" onkeydown="if(isPlainEnterKey(event,this)){event.preventDefault();renderWatchTagPickerList();}">
+    </div>
+    <div id="watch-tag-picker-selected" class="active-tags-bar" style="display:none;margin-bottom:8px;"></div>
+    <div id="watch-tag-picker-list" class="tag-picker-list"></div>
+    <div style="margin-top:10px;display:flex;gap:8px;">
+      <button type="button" class="btn-big" style="flex:1;background:#6b7280;" onclick="clearWatchTagFilters()">✕ タグ解除</button>
+      <button type="button" class="btn-big btn-watch" style="flex:1;" onclick="closeWatchTagPickerModal()">結果を見る</button>
+    </div>
   </div>
 </div>
 

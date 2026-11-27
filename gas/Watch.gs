@@ -30,6 +30,20 @@ function getWatchEntries() {
   }, { label: 'getWatchEntries' });
 }
 
+function splitWatchFieldTokens_(raw) {
+  return String(raw || '')
+    .split(/[,、]/)
+    .map(s => s.trim())
+    .filter(Boolean);
+}
+
+function parseWatchTagFilterParam_(raw) {
+  if (Array.isArray(raw)) {
+    return raw.map(s => String(s || '').trim()).filter(Boolean);
+  }
+  return splitWatchFieldTokens_(raw);
+}
+
 function queryWatchEntries_(params) {
   const all = getWatchEntries();
   const totalCount = all.length;
@@ -38,6 +52,8 @@ function queryWatchEntries_(params) {
   const status = String(params.status || '').trim();
   const category = String(params.category || '').trim();
   const platform = String(params.platform || '').trim();
+  const castTagFilters = parseWatchTagFilterParam_(params.castTag);
+  const staffTagFilters = parseWatchTagFilterParam_(params.staffTag);
   const sort = String(params.sort || 'desc').trim();
   const limit = Number(params.limit || 0);
   const offset = Math.max(0, Number(params.offset || 0));
@@ -85,6 +101,14 @@ function queryWatchEntries_(params) {
     if (category && category !== 'ALL' && item.category !== category) return false;
     if (platform && platform !== 'ALL' && !String(item.platform || '').includes(platform)) return false;
     if (ym && !String(item.watchDate || '').startsWith(ym)) return false;
+    if (castTagFilters.length > 0) {
+      const tokens = splitWatchFieldTokens_(item.cast);
+      if (!castTagFilters.every(tag => tokens.includes(tag))) return false;
+    }
+    if (staffTagFilters.length > 0) {
+      const tokens = splitWatchFieldTokens_(item.staff);
+      if (!staffTagFilters.every(tag => tokens.includes(tag))) return false;
+    }
     if (q) {
       const hay = `${item.title} ${item.cast} ${item.staff} ${item.platform} ${item.memo} ${item.summary}`.toLowerCase();
       if (!hay.includes(q)) return false;
