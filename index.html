@@ -9,7 +9,7 @@
   <link rel="manifest" href="./manifest.json">
   <link rel="apple-touch-icon" href="./apple-touch-icon.png">
   <link rel="icon" type="image/png" href="./icon-192.png">
-  <title>ライフログ・ダッシュボード v1.36.2</title>
+  <title>ライフログ・ダッシュボード v1.37.0</title>
   <link rel="stylesheet" href="./css/style.css">
 </head>
 <body>
@@ -17,7 +17,7 @@
   <div class="header-top">
     <h1 class="app-title">📚 ライフログ・ダッシュボード</h1>
     <div class="header-right">
-      <button type="button" class="ver-badge" id="app-version" onclick="openReleaseNotesModal()" title="変更履歴（リリースノート）を表示">📋 v1.36.2</button>
+      <button type="button" class="ver-badge" id="app-version" onclick="openReleaseNotesModal()" title="変更履歴（リリースノート）を表示">📋 v1.37.0</button>
       <button class="btn-sm" id="btn-check-update" onclick="manualCheckUpdate()" title="最新バージョン確認・更新">🔄 更新</button>
     </div>
   </div>
@@ -209,8 +209,27 @@
     <div class="field"><label>メモ・感想</label><textarea id="w-memo" rows="8" style="min-height:220px;line-height:1.6;" oninput="autoResizeTextarea(this, 220)"></textarea></div>
     <div class="field" id="w-notion-wrap" style="display:none;"><label>Notion元URL</label><a id="w-notion-link" class="related-url-badge" target="_blank" rel="noopener noreferrer" href="#">🔗 Notion元ページを開く</a></div>
     <div class="field"><label><input type="checkbox" id="w-wiki" checked style="width:auto;"> <span id="w-wiki-label">登録時にWikipediaからキャスト・概要を自動補完する</span></label></div>
+    <button type="button" class="btn-big" id="btn-watch-wiki-preview" style="display:none;width:100%;margin-bottom:8px;background:#0284c7;" onclick="openWikiPreviewForEditingWatch()">🌐 Wikipedia補完（候補プレビュー）</button>
     <button class="btn-big btn-watch" style="width:100%;" id="btn-save-watch" onclick="submitWatch()">保存する</button>
     <button class="btn-danger" id="btn-delete-watch" style="display:none;" onclick="deleteCurrentWatch()">🗑️ この鑑賞記録を削除</button>
+  </div>
+</div>
+
+<div class="modal-backdrop" id="modal-wiki-candidates" onclick="if(event.target===this) closeWikiPreviewModal()">
+  <div class="modal" style="max-height:86vh;display:flex;flex-direction:column;">
+    <div class="modal-title">
+      <span id="wiki-modal-title">🌐 Wikipedia候補プレビュー</span>
+      <button type="button" class="btn-sm" onclick="closeWikiPreviewModal()">✕</button>
+    </div>
+    <div class="wiki-mode-bar" id="wiki-mode-bar">
+      <button type="button" class="wiki-mode-btn active" id="wiki-mode-fill" onclick="setWikiApplyMode('fill_empty')">空欄のみ補完</button>
+      <button type="button" class="wiki-mode-btn" id="wiki-mode-overwrite" onclick="setWikiApplyMode('overwrite_summary_year')">概要・公開年を上書き再補完</button>
+    </div>
+    <div id="wiki-candidates-status" class="wiki-status-note"></div>
+    <div id="wiki-candidates-body" class="wiki-candidates-list"></div>
+    <div style="margin-top:12px;">
+      <button type="button" class="btn-big" style="width:100%;background:#4b5563;" onclick="closeWikiPreviewModal()">キャンセル / 該当なし</button>
+    </div>
   </div>
 </div>
 

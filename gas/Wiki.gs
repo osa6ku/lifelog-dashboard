@@ -219,15 +219,85 @@ function normalizeAllPlatforms() {
 }
 
 function cleanWorkTitle_(rawTitle) {
-  const s = String(rawTitle || '')
+  let s = String(rawTitle || '')
     .replace(/[\x00-\x1f\x7f-\x9f]/g, '')
     .replace(/\\_/g, '_')
     .trim();
-  const stripped = s
-    .replace(/^(?:\[.*?\]|【.*?】|TVアニメ|テレビドラマ|ドラマ|映画|アニメ|小説|漫画|本|舞台|ドキュメンタリー|バラエティ)[『「\s]*(.*?)[』」\s]*$/, '$1')
+  if (!s) return '';
+  s = s
+    .replace(/^(?:\[.*?\]|【.*?】|(?:TVアニメ|テレビドラマ|ドラマ|映画|アニメ|小説|漫画|本|舞台|ドキュメンタリー|バラエティ)[:：]?)[『「\s　]*(.*?)[』」\s　]*$/, '$1')
     .replace(/^[『「](.*?)[』」]$/, '$1')
     .trim();
-  return stripped || s;
+  // シリーズ・シーズン括弧を除去（例: "ドラゴン桜（第2シリーズ）" → "ドラゴン桜"）
+  s = s
+    .replace(/[\s　]*[（(](?:第?\s*[0-9０-９]+\s*(?:シリーズ|期)|シーズン\s*[0-9０-９]+|Season\s*\d+)[）)]\s*$/i, '')
+    .trim();
+  // 話数メモ・進捗メモを除去（例: "41-last", "1-10", "第1話", "全12話", "Ep.3", "#5"）
+  s = s
+    .replace(/[\s　]+(?:第?\d+\s*[-〜~]\s*(?:last|最終話?|終|\d+話?)|第\d+話(?:まで)?|全\d+話|Ep\.?\s*\d+|#\d+)\s*$/i, '')
+    .trim();
+  // 上下巻・前後編を除去（例: "上巻", "下巻", "（上）"）
+  s = s
+    .replace(/[\s　]*[（(]?(?:上巻|中巻|下巻|前編|後編)[）)]?\s*$/, '')
+    .replace(/[\s　]+[（(](?:上|中|下)[）)]\s*$/, '')
+    .trim();
+  // 日本語タイトル末尾の英題括弧を除去（例: "きっと、うまくいく(3 idiots)" → "きっと、うまくいく"）
+  if (/[ぁ-んァ-ヶ一-龠々]/.test(s)) {
+    s = s.replace(/[\s　]*[（(][A-Za-z0-9\s\-:'&.,!?]+[）)]\s*$/, '').trim();
+  }
+  // 英語タイトルのアンダースコア区切りをスペースへ正規化（例: "mission impossible _ ghost protocol"）
+  if (isEnglishTitle_(s)) {
+    s = s.replace(/\s*_\s*/g, ' ').replace(/\s{2,}/g, ' ').trim();
+  }
+  return s || String(rawTitle || '').trim();
+}
+
+function isEnglishTitle_(title) {
+  const s = String(title || '').trim();
+  if (!s) return false;
+  if (/[ぁ-んァ-ヶ一-龠々]/.test(s)) return false;
+  return /[A-Za-z]{2,}/.test(s);
+}
+
+function normalizeWikiTitleForCompare_(str) {
+  return String(str || '')
+    .replace(/[Ａ-Ｚａ-ｚ０-９]/g, ch => String.fromCharCode(ch.charCodeAt(0) - 0xFEE0))
+    .replace(/\s*[（(][^）)]*[）)]\s*$/g, '')
+    .replace(/[\s　・:：\-‐–—_/!！?？「」『』〈〉《》'".,、。&＆]/g, '')
+    .toLowerCase();
+}
+
+function parseWatchYear_(watchDate) {
+  const m = String(watchDate || '').match(/^((?:19|20)\d{2})/);
+  return m ? Number(m[1]) : 0;
+}
+
+function extractWikipediaUrlsFromRelated_(relatedUrl) {
+  const out = [];
+  const seen = new Set();
+  const urls = typeof parseRelatedUrls_ === 'function'
+    ? parseRelatedUrls_(relatedUrl)
+    : String(relatedUrl || '').split(/[\r\n,]+/).map(s => s.trim()).filter(Boolean);
+  for (const u of urls) {
+    const m = u.match(/^https?:\/\/(ja|en)\.wikipedia\.org\/wiki\/([^#?\s]+)/i);
+    if (!m) continue;
+    const lang = m[1].toLowerCase();
+    let title = m[2];
+    try { title = decodeURIComponent(title); } catch (_) {}
+    title = title.replace(/_/g, ' ').trim();
+    const key = `${lang}:${title}`;
+    if (title && !seen.has(key)) {
+      seen.add(key);
+      out.push({ lang, title, url: u });
+    }
+  }
+  return out;
+}
+
+function buildWikiArticleUrl_(lang, title) {
+  const l = lang === 'en' ? 'en' : 'ja';
+  const encoded = encodeURIComponent(String(title || '').replace(/ /g, '_'));
+  return `https://${l}.wikipedia.org/wiki/${encoded}`;
 }
 
 function enrichRow_(sheet, row) {
@@ -236,25 +306,34 @@ function enrichRow_(sheet, row) {
   if (!rawTitle) return;
 
   const category = String(cur[COL.CATEGORY - 1] || '').trim();
-  const cleanTitle = cleanWorkTitle_(rawTitle);
-
   const curSummary = String(cur[COL.SUMMARY - 1] || '').trim();
-  const wiki = fetchWikipediaInfo_(cleanTitle || rawTitle, category);
+  const hints = {
+    rawTitle,
+    staff: String(cur[COL.STAFF - 1] || '').trim(),
+    cast: String(cur[COL.CAST - 1] || '').trim(),
+    memo: String(cur[COL.MEMO - 1] || '').trim(),
+    relatedUrl: String(cur[COL.RELATED_URL - 1] || '').trim(),
+    watchDate: typeof formatDateVal_ === 'function' ? formatDateVal_(cur[COL.WATCH_DATE - 1]) : String(cur[COL.WATCH_DATE - 1] || '').slice(0, 10),
+    releaseYear: String(cur[COL.RELEASE_YEAR - 1] || '').trim(),
+  };
+
+  const wiki = fetchWikipediaInfo_(rawTitle, category, hints);
   if (!wiki) {
     // 作品記事が見つからない場合は一般用語等で埋めず、空欄のまま見送る
     return;
   }
 
-  if (wiki.year && !cur[COL.RELEASE_YEAR - 1]) {
+  const watchYear = parseWatchYear_(hints.watchDate);
+  if (wiki.year && !cur[COL.RELEASE_YEAR - 1] && (!watchYear || Number(wiki.year) <= watchYear)) {
     sheet.getRange(row, COL.RELEASE_YEAR).setValue(wiki.year);
   }
-  if (wiki.platforms.length > 0) {
+  if (wiki.platforms && wiki.platforms.length > 0) {
     const curPlat = String(cur[COL.PLATFORM - 1] || '');
     const memo = String(cur[COL.MEMO - 1] || '');
     const merged = [curPlat, ...wiki.platforms].filter(Boolean).join(', ');
     sheet.getRange(row, COL.PLATFORM).setValue(normalizePlatforms_(merged, `${rawTitle} ${memo}`));
   }
-  if (wiki.cast.length > 0) {
+  if (wiki.cast && wiki.cast.length > 0) {
     const curCast = String(cur[COL.CAST - 1] || '')
       .split(/[,、]/)
       .map(s => s.trim())
@@ -263,7 +342,7 @@ function enrichRow_(sheet, row) {
     wiki.cast.forEach(c => { if (c && !mergedCast.includes(c)) mergedCast.push(c); });
     sheet.getRange(row, COL.CAST).setValue(mergedCast.slice(0, MAX_CAST).join(', '));
   }
-  if (wiki.staff.length > 0) {
+  if (wiki.staff && wiki.staff.length > 0) {
     const curStaff = String(cur[COL.STAFF - 1] || '')
       .split(/[,、]/)
       .map(s => s.trim())
@@ -274,6 +353,16 @@ function enrichRow_(sheet, row) {
   }
   if (wiki.summary && (!curSummary || curSummary.startsWith('⚠️ Wikipedia記事が見つかりませんでした'))) {
     sheet.getRange(row, COL.SUMMARY).setValue(wiki.summary);
+  }
+  // Muse補足3: 採用Wikipedia記事URLを既存関連URLへ重複排除マージ保存
+  if (wiki.url && /^https?:\/\//i.test(wiki.url)) {
+    const existingUrls = typeof parseRelatedUrls_ === 'function'
+      ? parseRelatedUrls_(cur[COL.RELATED_URL - 1] || '')
+      : String(cur[COL.RELATED_URL - 1] || '').split(/[\r\n,]+/).map(s => s.trim()).filter(Boolean);
+    if (!existingUrls.includes(wiki.url)) {
+      existingUrls.push(wiki.url);
+      sheet.getRange(row, COL.RELATED_URL).setValue(existingUrls.join('\n'));
+    }
   }
 }
 
@@ -303,8 +392,12 @@ function normalizePlatforms_(rawStr, contextText) {
   return result.join(', ');
 }
 
-function fetchWikiPageRaw_(apiBase, headers, title) {
-  const url = `${apiBase}?action=query&redirects=1&prop=revisions%7Cextracts%7Ccategories%7Cpageprops&rvprop=content&exintro=1&explaintext=1&cllimit=50&titles=${encodeURIComponent(title)}&format=json`;
+function fetchWikiPageRaw_(apiBase, headers, title, lang, includeLangLinks) {
+  const props = includeLangLinks
+    ? 'revisions%7Cextracts%7Ccategories%7Cpageprops%7Clanglinks'
+    : 'revisions%7Cextracts%7Ccategories%7Cpageprops';
+  const extra = includeLangLinks ? '&lllang=ja' : '';
+  const url = `${apiBase}?action=query&redirects=1&prop=${props}${extra}&rvprop=content&exintro=1&explaintext=1&cllimit=50&titles=${encodeURIComponent(title)}&format=json`;
   const res = UrlFetchApp.fetch(url, { headers, muteHttpExceptions: true });
   if (res.getResponseCode() !== 200) return null;
   const json = JSON.parse(res.getContentText());
@@ -313,128 +406,366 @@ function fetchWikiPageRaw_(apiBase, headers, title) {
   const page = Object.values(pages)[0];
   if (!page || page.missing !== undefined) return null;
   const categories = (page.categories || []).map(c => String(c.title || ''));
-  const isDisambig = Boolean((page.pageprops && page.pageprops.disambiguation !== undefined) || categories.some(c => c.includes('曖昧さ回避')));
-  const redirected = Array.isArray(query.redirects) && query.redirects.length > 0;
+  const isDisambig = Boolean(
+    (page.pageprops && page.pageprops.disambiguation !== undefined) ||
+    categories.some(c => /曖昧さ回避|disambiguation/i.test(c))
+  );
+  const redirects = Array.isArray(query.redirects) ? query.redirects : [];
+  const redirected = redirects.length > 0;
+  const redirectFrom = redirected ? String(redirects[0].from || '') : '';
+  const jaLangLink = Array.isArray(page.langlinks) && page.langlinks[0] ? String(page.langlinks[0]['*'] || '') : '';
+  const resolvedLang = lang === 'en' ? 'en' : 'ja';
   return {
     title: String(page.title || ''),
+    lang: resolvedLang,
+    url: buildWikiArticleUrl_(resolvedLang, String(page.title || '')),
     extract: String(page.extract || '').trim(),
     wikitext: String((page.revisions && page.revisions[0] && page.revisions[0]['*']) || ''),
     categories,
     isDisambig,
     redirected,
+    redirectFrom,
+    jaLangLink,
   };
 }
 
-function isTitleRelevant_(page, cleanTitle) {
-  const norm = (s) => String(s || '')
-    .replace(/\s*\([^)]*\)\s*$/g, '')
-    .replace(/[\s　・:：\-‐–—/!！?？「」『』'".,、。]/g, '')
-    .toLowerCase();
-  const nPage = norm(page.title);
-  const nClean = norm(cleanTitle);
+function isTitleRelevant_(page, cleanTitle, options) {
+  if (!page || !page.title) return false;
+  const opts = options || {};
+  if (opts.fromRelatedUrl || page.fromRelatedUrl) return true;
+
+  const nPage = normalizeWikiTitleForCompare_(page.title);
+  const nClean = normalizeWikiTitleForCompare_(cleanTitle);
   if (!nPage || !nClean) return false;
-  if (nPage === nClean || nPage.includes(nClean) || (nPage.length >= 2 && nClean.includes(nPage))) return true;
-  // 原題・別表記がリード文冒頭に含まれる場合（例: EX_MACHINA -> エクス・マキナ）
-  const introNorm = String(page.extract || '').slice(0, 220).replace(/[\s　・:：\-‐–—/!！?？「」『』'".,、。]/g, '').toLowerCase();
-  if (nClean.length >= 2 && introNorm.includes(nClean)) return true;
+
+  // 1. 正規化タイトル完全一致
+  if (nPage === nClean) return true;
+
+  // 2. 包含一致（短すぎる無関係語や別作品の誤一致を防ぐため比率ガード付）
+  if (nClean.length >= 2 && nPage.includes(nClean)) {
+    const ratio = nClean.length / nPage.length;
+    if (ratio >= 0.45 || nClean.length >= 5) return true;
+  }
+  if (nPage.length >= 3 && nClean.includes(nPage)) {
+    const ratio = nPage.length / nClean.length;
+    if (ratio >= 0.45) return true;
+  }
+
+  // 3. Wikipedia公式リダイレクト元が検索タイトルと一致（例: g@me → ゲームの名は誘拐, すばらしき世界 → 身分帳）
+  if (page.redirected && page.redirectFrom) {
+    const nFrom = normalizeWikiTitleForCompare_(page.redirectFrom);
+    if (nFrom && (nFrom === nClean || (nClean.length >= 3 && nFrom.includes(nClean)) || (nFrom.length >= 3 && nClean.includes(nFrom)))) {
+      return true;
+    }
+  }
+
+  // 4. 英語版Wikipedia経由の言語間リンク一致（例: Cars 2 → カーズ2, Mission: Impossible – Ghost Protocol → ミッション:インポッシブル/...）
+  if (page.enSourceTitle) {
+    const nEn = normalizeWikiTitleForCompare_(page.enSourceTitle);
+    if (nEn && (nEn === nClean || nEn.includes(nClean) || nClean.includes(nEn))) {
+      return true;
+    }
+  }
+
+  // 5. 英語タイトルで日本語記事リード文冒頭に原題表記がある場合のみ許容（例: EX_MACHINA → エクス・マキナ）
+  if (isEnglishTitle_(cleanTitle) && nClean.length >= 4) {
+    const introNorm = normalizeWikiTitleForCompare_(String(page.extract || '').slice(0, 220));
+    if (introNorm.includes(nClean)) return true;
+  }
+
   return false;
 }
 
-function isValidWorkArticle_(page, cleanTitle, category) {
+function isValidWorkArticle_(page, cleanTitle, category, options) {
   if (!page || page.isDisambig) return false;
-  if (!isTitleRelevant_(page, cleanTitle)) return false;
+  if (!isTitleRelevant_(page, cleanTitle, options)) return false;
   const catsStr = (page.categories || []).join(' ');
-  const intro = String(page.extract || '').slice(0, 350);
+  const intro = String(page.extract || '').slice(0, 400);
   const wt = String(page.wikitext || '');
 
-  // 人物記事は作品ではないため除外
-  if (/(存命人物|年の生|年の没|の俳優|の女優|の声優|の小説家|の映画監督|の歌手|のミュージシャン)/.test(catsStr)) {
+  // 人物記事・賞記事は作品ではないため除外
+  if (/(存命人物|年の生|年の没|の俳優|の女優|の声優|の小説家|の映画監督|の歌手|のミュージシャン|living people|births|deaths)/i.test(catsStr)) {
+    return false;
+  }
+  if (/(文学賞|映画賞|音楽賞|awards)/i.test(catsStr) && !/(小説|映画|テレビドラマ|アニメ|film|television|novel)/i.test(intro)) {
     return false;
   }
 
-  const hasDrama = /(テレビドラマ|ドラマ|連続ドラマ|配信ドラマ|放送|テレビ番組)/.test(catsStr + ' ' + intro) || /\{\{\s*(?:基礎情報\s*テレビ番組|Infobox\s*television)/i.test(wt);
-  const hasMovie = /(映画|劇場版|公開|配給|監督)/.test(catsStr + ' ' + intro) || /\{\{\s*(?:Infobox\s*Film|Infobox\s*映画|基礎情報\s*映画)/i.test(wt);
-  const hasAnime = /(アニメ|アニメーション)/.test(catsStr + ' ' + intro) || /\{\{\s*Infobox\s*animanga/i.test(wt);
-  const hasBook = /(小説|書籍|著書|漫画|エッセイ|ノンフィクション|文学|刊行|連載)/.test(catsStr + ' ' + intro) || /\{\{\s*(?:基礎情報\s*書籍|Infobox\s*book|Infobox\s*animanga)/i.test(wt);
+  const hasDrama = /(テレビドラマ|ドラマ|連続ドラマ|配信ドラマ|放送|テレビ番組|television series|tv series|miniseries)/i.test(catsStr + ' ' + intro) || /\{\{\s*(?:基礎情報\s*テレビ番組|Infobox\s*television)/i.test(wt);
+  const hasMovie = /(映画|劇場版|公開|配給|監督|\bfilm\b|\bmovie\b)/i.test(catsStr + ' ' + intro) || /\{\{\s*(?:Infobox\s*Film|Infobox\s*映画|基礎情報\s*映画)/i.test(wt);
+  const hasAnime = /(アニメ|アニメーション|\banime\b)/i.test(catsStr + ' ' + intro) || /\{\{\s*Infobox\s*animanga/i.test(wt);
+  const hasBook = /(小説|書籍|著書|漫画|エッセイ|ノンフィクション|文学|刊行|連載|\bnovel\b|\bbook\b|\bmanga\b)/i.test(catsStr + ' ' + intro) || /\{\{\s*(?:基礎情報\s*書籍|Infobox\s*book|Infobox\s*animanga)/i.test(wt);
 
   if (category === 'ドラマ') return hasDrama;
   if (category === '映画') return hasMovie;
   if (category === 'アニメ') return hasAnime;
   if (category === '本') return hasBook;
-  // その他・未指定でも作品を示す語が含まれない一般用語記事は除外
-  return hasDrama || hasMovie || hasAnime || hasBook || /(ドキュメンタリー|バラエティ|舞台|音楽番組|ライブ|コンサート|出演|脚本|監督|著者)/.test(catsStr + ' ' + intro);
+  return hasDrama || hasMovie || hasAnime || hasBook || /(ドキュメンタリー|バラエティ|舞台|音楽番組|ライブ|コンサート|出演|脚本|監督|著者)/i.test(catsStr + ' ' + intro);
 }
 
-function fetchWikipediaInfo_(title, category) {
-  const apiBase = 'https://ja.wikipedia.org/w/api.php';
-  const headers = { 'User-Agent': WIKI_USER_AGENT };
-  const cleanTitle = cleanWorkTitle_(title);
+/**
+ * 3-58 対策B＋Muse補足1: 公開年・放送年の高精度抽出＆鑑賞年超過検証
+ * - 映像作品（ドラマ/映画/アニメ）では原作小説・漫画の発表年を除外し、放送・公開年のみを採用
+ * - 複数シリーズ/シーズンがある場合はタイトル・メモ内の年/シリーズ指定、または鑑賞年以下の直近年を優先
+ * - 採用年が鑑賞年を超える場合は不採用（year: ''）とし yearWarning を付与
+ */
+function extractReleaseYear_(page, category, hints) {
+  const h = hints || {};
+  const wt = String((page && page.wikitext) || '');
+  const intro = String((page && page.extract) || '');
   const cat = String(category || '').trim();
-
-  // 1. 区分に応じた曖昧さ回避サフィックス付き記事を最優先で探索
-  const suffixMap = {
-    'ドラマ': [' (テレビドラマ)', ' (ドラマ)'],
-    '映画': [' (映画)'],
-    'アニメ': [' (アニメ)'],
-    '本': [' (小説)', ' (書籍)', ' (漫画)'],
-  };
-  const hintMap = {
-    'ドラマ': 'テレビドラマ',
-    '映画': '映画',
-    'アニメ': 'アニメ',
-    '本': '小説',
-  };
+  const watchYear = parseWatchYear_(h.watchDate || '');
+  const isVideo = cat === 'ドラマ' || cat === '映画' || cat === 'アニメ';
+  const isBook = cat === '本';
 
   const candidates = [];
-  const pushUnique = (t) => {
-    const s = String(t || '').trim();
-    if (s && !candidates.includes(s)) candidates.push(s);
+  const addYear = (yr, priority, source) => {
+    const n = Number(yr);
+    if (!n || n < 1900 || n > 2100) return;
+    const existing = candidates.find(c => c.year === n);
+    if (!existing) {
+      candidates.push({ year: n, priority, source });
+    } else if (priority > existing.priority) {
+      existing.priority = priority;
+      existing.source = source;
+    }
   };
 
-  (suffixMap[cat] || []).forEach(suf => pushUnique(cleanTitle + suf));
-  pushUnique(cleanTitle);
+  // 1. Wikitext Infobox フィールドから行単位で抽出（原作・小説年と映像公開年を厳密に分離）
+  const videoFieldRe = /^\s*\|\s*(?:公開|公開年|公開日|劇場公開|放送期間|放送年|初回放送|配信期間|製作年|released|first_aired|release_date)\s*=\s*(.+)$/i;
+  const bookFieldRe = /^\s*\|\s*(?:発行日|出版年|発表|刊行|初版|published|release_date)\s*=\s*(.+)$/i;
+  const anyYearRe = /((?:19|20)\d{2})(?:年|\b)/g;
 
-  // 2. 検索候補（区分ヒント付き → 通常検索）を後ろへ追加
-  const searchQueries = [];
-  if (hintMap[cat]) searchQueries.push(`${cleanTitle} ${hintMap[cat]}`);
-  searchQueries.push(cleanTitle);
-
-  for (const sq of searchQueries) {
-    const searchUrl = `${apiBase}?action=query&list=search&srsearch=${encodeURIComponent(sq)}&srlimit=5&format=json`;
-    const sRes = UrlFetchApp.fetch(searchUrl, { headers, muteHttpExceptions: true });
-    if (sRes.getResponseCode() !== 200) continue;
-    const sJson = JSON.parse(sRes.getContentText());
-    const results = (sJson.query && sJson.query.search) || [];
-    results.forEach(r => pushUnique(r.title));
+  for (const line of wt.split('\n')) {
+    if (isVideo) {
+      const vm = line.match(videoFieldRe);
+      if (vm) {
+        const val = vm[1];
+        // 原作・小説・漫画の注釈を含む同一行内の年を除外
+        const cleanedVal = val.replace(/(?:原作|小説|漫画|コミック)[^|,\n]*(?:19|20)\d{2}年?/g, '');
+        let ym;
+        anyYearRe.lastIndex = 0;
+        while ((ym = anyYearRe.exec(cleanedVal)) !== null) {
+          addYear(ym[1], 100, 'infobox_video');
+        }
+      }
+    } else if (isBook) {
+      const bm = line.match(bookFieldRe);
+      if (bm) {
+        let ym;
+        anyYearRe.lastIndex = 0;
+        while ((ym = anyYearRe.exec(bm[1])) !== null) {
+          addYear(ym[1], 100, 'infobox_book');
+        }
+      }
+    } else {
+      const m = line.match(videoFieldRe) || line.match(bookFieldRe);
+      if (m) {
+        let ym;
+        anyYearRe.lastIndex = 0;
+        while ((ym = anyYearRe.exec(m[1])) !== null) {
+          addYear(ym[1], 90, 'infobox');
+        }
+      }
+    }
   }
 
-  const seenResolved = new Set();
-  let page = null;
-  for (const cand of candidates.slice(0, 8)) {
-    const p = fetchWikiPageRaw_(apiBase, headers, cand);
-    if (!p) continue;
-    if (seenResolved.has(p.title)) continue;
-    seenResolved.add(p.title);
-    // 作品記事の健全性チェック（タイトル関連性＋一般用語へのリダイレクト除外）
-    if (!isValidWorkArticle_(p, cleanTitle, cat)) continue;
-    page = p;
-    break;
+  // 2. 複数シリーズ・シーズン見出し／本文（例: ドラゴン桜 第2シリーズ 2021年, 救命病棟24時 2026年）
+  if (isVideo) {
+    const seriesRe = /(?:第\s*[2-9２-９]\s*(?:シリーズ|期)|シーズン\s*[2-9２-９]|Season\s*[2-9]|((?:19|20)\d{2})年版)[^\n]{0,80}?((?:19|20)\d{2})年/gi;
+    let sm;
+    while ((sm = seriesRe.exec(wt + '\n' + intro)) !== null) {
+      if (sm[1]) addYear(sm[1], 95, 'series_heading');
+      if (sm[2]) addYear(sm[2], 95, 'series_heading');
+    }
+    // リード文中の放送・公開年（原作年・刊行年・別年をまたぐ誤マッチを除外）
+    const introVideoRe = /((?:19|20)\d{2})年(?:(?!(?:19|20)\d{2}年|刊行|出版|連載|発売)[^。\n]){0,25}?(?:公開|放送|配信|上映|アニメ化|ドラマ化|映画化)/g;
+    let im;
+    while ((im = introVideoRe.exec(intro)) !== null) {
+      // 同一文内の直前に「原作」「小説」「漫画」がないか確認（句点。をまたぐ前文は除外）
+      const prefix = intro.slice(Math.max(0, im.index - 15), im.index).split('。').pop();
+      if (!/(?:原作|小説|漫画|著書)/.test(prefix)) {
+        addYear(im[1], 80, 'intro_video');
+      }
+    }
+    // 英語リード文（例: "is a 2013 American animated ... film"）
+    const enVideoRe = /\b((?:19|20)\d{2})\s+(?:American|British|Japanese|Canadian|French|South Korean|animated|comedy|action|drama|science fiction|thriller|adventure|fantasy|television|TV)[^.\n]{0,40}?\b(?:film|movie|series|miniseries|anime)\b/gi;
+    let em;
+    while ((em = enVideoRe.exec(intro)) !== null) {
+      addYear(em[1], 85, 'en_intro_video');
+    }
+  } else if (isBook) {
+    const introBookRe = /((?:19|20)\d{2})年[^。\n]{0,25}?(?:刊行|発表|出版|連載|発売|初出)/g;
+    let im;
+    while ((im = introBookRe.exec(intro)) !== null) {
+      addYear(im[1], 80, 'intro_book');
+    }
   }
-  if (!page) return null;
 
-  const pageTitle = page.title;
-  const wikitext = page.wikitext;
-  const summary = (page.extract || '').split('\n')[0].slice(0, 400);
+  if (candidates.length === 0) {
+    return { year: '', rawExtractedYear: '', yearWarning: '' };
+  }
 
-  // 公開年・放送年抽出
-  const yearMatch = wikitext.match(/\|\s*(?:公開|放送期間|放送年|製作年|発表|発行日|出版年)\s*=\s*.*?((?:19|20)\d{2})年/);
-  const year = yearMatch ? Number(yearMatch[1]) : '';
+  // 3. レコードのタイトル・メモに明示的な年がある場合は優先マッチ
+  const hintText = `${h.rawTitle || ''} ${h.memo || ''}`;
+  const explicitYears = [];
+  const expRe = /\b((?:19|20)\d{2})\b/g;
+  let exm;
+  while ((exm = expRe.exec(hintText)) !== null) {
+    explicitYears.push(Number(exm[1]));
+  }
+  const explicitMatch = candidates.find(c => explicitYears.includes(c.year) && (!watchYear || c.year <= watchYear));
+  if (explicitMatch) {
+    return { year: explicitMatch.year, rawExtractedYear: explicitMatch.year, yearWarning: '' };
+  }
+
+  // 4. 鑑賞年との整合検証（Muse補足1）
+  if (watchYear) {
+    const validForWatch = candidates.filter(c => c.year <= watchYear);
+    if (validForWatch.length === 0) {
+      // すべての候補年が鑑賞年を超えている → 不採用＋警告
+      const earliest = candidates.slice().sort((a, b) => a.year - b.year)[0];
+      return {
+        year: '',
+        rawExtractedYear: earliest.year,
+        yearWarning: `抽出年(${earliest.year})が鑑賞年(${watchYear})を超えているため不採用`,
+      };
+    }
+    // 複数シリーズ（例: ドラゴン桜 2005 & 2021、鑑賞2021）では鑑賞年以下の直近年を優先
+    // ただし単作（映画等）で高優先度infobox年が1つだけ有効ならそれを採用
+    const highPri = validForWatch.filter(c => c.priority >= 80);
+    const pool = highPri.length > 0 ? highPri : validForWatch;
+    if (cat === 'ドラマ' && pool.length > 1) {
+      pool.sort((a, b) => b.year - a.year);
+    } else {
+      pool.sort((a, b) => b.priority - a.priority || a.year - b.year);
+    }
+    return { year: pool[0].year, rawExtractedYear: pool[0].year, yearWarning: '' };
+  }
+
+  // 鑑賞年未設定時は最高優先度・最古年（単作の初公開年）を採用
+  candidates.sort((a, b) => b.priority - a.priority || a.year - b.year);
+  return { year: candidates[0].year, rawExtractedYear: candidates[0].year, yearWarning: '' };
+}
+
+function extractMemoHintKeywords_(memo) {
+  const text = String(memo || '').replace(/https?:\/\/\S+/g, ' ').trim();
+  if (!text) return [];
+  const stopWords = new Set([
+    '映画', 'ドラマ', 'アニメ', '小説', '漫画', '作品', '視聴', '鑑賞', '面白い', '面白かった',
+    '最高', '感動', 'おすすめ', 'シリーズ', 'シーズン', '最終回', '原作', '主演', '監督',
+    '脚本', '俳優', '女優', 'テレビ', 'ネットフリックス', 'アマプラ', '配信', '劇場', '最後',
+    'ストーリー', 'キャラクター', '展開', '結末', '感想', 'メモ', 'とても', 'かなり', 'すごく',
+  ]);
+  const tokens = [];
+  const seen = new Set();
+  const re = /[一-龠々]{2,8}|[ァ-ヶー]{3,12}|[A-Za-z]{4,16}/g;
+  let m;
+  while ((m = re.exec(text)) !== null) {
+    const tok = m[0].trim();
+    if (!tok || stopWords.has(tok) || seen.has(tok)) continue;
+    seen.add(tok);
+    tokens.push(tok);
+    if (tokens.length >= 12) break;
+  }
+  return tokens;
+}
+
+function scoreWikiCandidate_(page, cleanTitle, category, hints, yearInfo) {
+  const h = hints || {};
+  let score = 0;
+  const matchedHints = [];
+
+  if (page.fromRelatedUrl) {
+    score += 100;
+    matchedHints.push('関連URL一致');
+  }
+
+  const nPage = normalizeWikiTitleForCompare_(page.title);
+  const nClean = normalizeWikiTitleForCompare_(cleanTitle);
+  if (nPage && nClean && nPage === nClean) {
+    score += 40;
+    matchedHints.push('タイトル完全一致');
+  } else if (page.redirected && page.redirectFrom && normalizeWikiTitleForCompare_(page.redirectFrom) === nClean) {
+    score += 35;
+    matchedHints.push(`リダイレクト一致 (${page.redirectFrom})`);
+  } else if (page.enSourceTitle) {
+    score += 30;
+    matchedHints.push(`英語原題一致 (${page.enSourceTitle})`);
+  } else if (nPage && nClean && (nPage.includes(nClean) || nClean.includes(nPage))) {
+    score += 20;
+  }
+
+  // 区分サフィックス一致ボーナス
+  const catSuffixReMap = {
+    'ドラマ': /\((?:テレビドラマ|ドラマ)\)/,
+    '映画': /\(映画\)/,
+    'アニメ': /\(アニメ\)/,
+    '本': /\((?:小説|書籍|漫画)\)/,
+  };
+  if (catSuffixReMap[category] && catSuffixReMap[category].test(page.title)) {
+    score += 25;
+    matchedHints.push(`区分一致 (${category})`);
+  }
+
+  const haystack = `${page.title}\n${page.extract || ''}\n${page.wikitext || ''}\n${(page.categories || []).join(' ')}`;
+  const hayNoSpace = haystack.replace(/[\s　]+/g, '').toLowerCase();
+
+  // 監督・スタッフヒント
+  const staffTokens = String(h.staff || '').split(/[,、\n]+/).map(s => s.trim()).filter(s => s.length >= 2);
+  let staffHits = 0;
+  for (const st of staffTokens) {
+    if (hayNoSpace.includes(st.replace(/[\s　]+/g, '').toLowerCase())) {
+      score += 25;
+      staffHits++;
+      if (staffHits <= 2) matchedHints.push(`スタッフ一致: ${st}`);
+    }
+  }
+
+  // 出演者ヒント
+  const castTokens = String(h.cast || '').split(/[,、\n]+/).map(s => s.trim()).filter(s => s.length >= 2);
+  let castHits = 0;
+  for (const ct of castTokens) {
+    if (hayNoSpace.includes(ct.replace(/[\s　]+/g, '').toLowerCase())) {
+      score += 15;
+      castHits++;
+      if (castHits <= 2) matchedHints.push(`出演者一致: ${ct}`);
+    }
+  }
+
+  // 感想・メモ本文ヒント
+  const memoKeywords = extractMemoHintKeywords_(h.memo || '');
+  let memoHits = 0;
+  for (const kw of memoKeywords) {
+    if (haystack.includes(kw)) {
+      score += 8;
+      memoHits++;
+      if (memoHits <= 2) matchedHints.push(`メモ一致: ${kw}`);
+      if (memoHits >= 4) break;
+    }
+  }
+
+  // 公開年・鑑賞年の整合性
+  const watchYear = parseWatchYear_(h.watchDate || '');
+  if (yearInfo && yearInfo.yearWarning) {
+    score -= 25;
+  } else if (yearInfo && yearInfo.year && watchYear && Number(yearInfo.year) <= watchYear) {
+    score += 10;
+  }
+
+  return { score, matchedHints };
+}
+
+function parseWikiPageMetadata_(page, cleanTitle, category, hints) {
+  const wikitext = String(page.wikitext || '');
+  const summary = String(page.extract || '').split('\n')[0].slice(0, 400);
+  const yearInfo = extractReleaseYear_(page, category, hints);
 
   // プラットフォーム・放送局抽出
   const platforms = [];
   for (const [canonical, aliases] of Object.entries(PLATFORM_TARGETS)) {
     const allNames = [canonical, ...aliases];
-    const platRegex = new RegExp(`\\|\\s*(?:放送局|製作局|配給|配信|放送枠)\\s*=.*?(?:${allNames.map(a => a.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})`, 'i');
+    const platRegex = new RegExp(`\\|\\s*(?:放送局|製作局|配給|配信|放送枠|network|distributor)\\s*=.*?(?:${allNames.map(a => a.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})`, 'i');
     if (platRegex.test(wikitext)) {
       platforms.push(canonical);
     }
@@ -447,20 +778,20 @@ function fetchWikipediaInfo_(title, category) {
   const skipWords = new Set(['日本', 'テレビドラマ', '映画', 'アニメ', 'TBS', 'フジテレビ', 'NHK', '日本テレビ', 'テレビ朝日', 'テレビ東京']);
 
   for (const line of wikitext.split('\n')) {
-    if (/==\s*(?:キャスト|出演者?|登場人物|声の出演)\s*==/.test(line)) {
+    if (/==\s*(?:キャスト|出演者?|登場人物|声の出演|Cast)\s*==/i.test(line)) {
       inCast = true;
       continue;
     } else if (/==\s*[^=]+\s*==/.test(line)) {
       inCast = false;
     }
 
-    const isStaffLine = /\|\s*(?:監督|脚本|原作|演出|プロデューサー|音楽|著者|作者)\s*=/.test(line);
-    const isCastLine = inCast || /\|\s*(?:出演者?|キャスト|主演|声の出演)\s*=/.test(line);
+    const isStaffLine = /\|\s*(?:監督|脚本|原作|演出|プロデューサー|音楽|著者|作者|director|writer|author|producer|music)\s*=/i.test(line);
+    const isCastLine = inCast || /\|\s*(?:出演者?|キャスト|主演|声の出演|starring)\s*=/i.test(line);
     if (!isStaffLine && !isCastLine) continue;
 
     const links = [...line.matchAll(/\[\[([^\]]+)\]\]/g)];
     for (const m of links) {
-      let name = m[1].split('|')[0].trim().replace(/\s*\(.*?\)/g, '');
+      const name = m[1].split('|')[0].trim().replace(/\s*\(.*?\)/g, '');
       if (!name || name.includes(':') || name.includes('年') || skipWords.has(name)) continue;
       if (isStaffLine) {
         if (!staff.includes(name)) staff.push(name);
@@ -470,7 +801,145 @@ function fetchWikipediaInfo_(title, category) {
     }
   }
 
-  return { pageTitle, year, platforms, cast, staff: staff.slice(0, 10), summary };
+  const scored = scoreWikiCandidate_(page, cleanTitle, category, hints, yearInfo);
+
+  return {
+    pageTitle: page.title,
+    title: page.title,
+    lang: page.lang || 'ja',
+    url: page.url || buildWikiArticleUrl_(page.lang || 'ja', page.title),
+    year: yearInfo.year,
+    rawExtractedYear: yearInfo.rawExtractedYear,
+    yearWarning: yearInfo.yearWarning,
+    platforms,
+    cast,
+    staff: staff.slice(0, 10),
+    summary,
+    extractSnippet: summary.slice(0, 160),
+    score: scored.score,
+    matchedHints: scored.matchedHints,
+    fromRelatedUrl: Boolean(page.fromRelatedUrl),
+    redirectedFrom: page.redirectFrom || '',
+    enSourceTitle: page.enSourceTitle || '',
+  };
+}
+
+/**
+ * 3-58 対策A＋B＋Muse補足1・2: Wikipedia 上位候補（最大5件）をスコアリング・ランク付けして返す
+ */
+function searchWikipediaCandidates_(title, category, hints) {
+  const jaApi = 'https://ja.wikipedia.org/w/api.php';
+  const enApi = 'https://en.wikipedia.org/w/api.php';
+  const headers = { 'User-Agent': WIKI_USER_AGENT };
+  const h = hints || {};
+  const rawTitle = h.rawTitle || title;
+  const cleanTitle = cleanWorkTitle_(title);
+  const cat = String(category || '').trim();
+  if (!cleanTitle) return [];
+
+  const suffixMap = {
+    'ドラマ': [' (テレビドラマ)', ' (ドラマ)'],
+    '映画': [' (映画)'],
+    'アニメ': [' (アニメ)'],
+    '本': [' (小説)', ' (書籍)', ' (漫画)'],
+  };
+
+  const candidates = []; // { lang, title, fromRelatedUrl, enSourceTitle }
+  const seenQuery = new Set();
+  const pushCandidate = (lang, t, extra) => {
+    const s = String(t || '').trim();
+    if (!s) return;
+    const key = `${lang}:${s}`;
+    if (seenQuery.has(key)) return;
+    seenQuery.add(key);
+    candidates.push(Object.assign({ lang, title: s, fromRelatedUrl: false, enSourceTitle: '' }, extra || {}));
+  };
+
+  // 0. 関連URLに wikipedia.org/wiki/... がある場合は最優先候補として直接追加（対策B）
+  const wikiUrls = extractWikipediaUrlsFromRelated_(h.relatedUrl || '');
+  wikiUrls.forEach(wu => pushCandidate(wu.lang, wu.title, { fromRelatedUrl: true }));
+
+  // 1. 完全一致 → 区分サフィックス一致 → 著者/監督サフィックス一致（対策A）
+  pushCandidate('ja', cleanTitle);
+  (suffixMap[cat] || []).forEach(suf => pushCandidate('ja', cleanTitle + suf));
+  const firstStaff = String(h.staff || '').split(/[,、\n]+/).map(s => s.trim()).filter(Boolean)[0] || '';
+  if (firstStaff) {
+    pushCandidate('ja', `${cleanTitle} (${firstStaff})`);
+    pushCandidate('ja', `${cleanTitle} (${firstStaff}の小説)`);
+  }
+  // 括弧副題付き（例: 万事快調〈オール・グリーンズ〉）のコアタイトルも候補化
+  const coreBeforeBracket = cleanTitle.replace(/[〈《（(][^〉》）)]+[〉》）)]/g, '').trim();
+  if (coreBeforeBracket && coreBeforeBracket !== cleanTitle && coreBeforeBracket.length >= 2) {
+    pushCandidate('ja', coreBeforeBracket);
+    (suffixMap[cat] || []).forEach(suf => pushCandidate('ja', coreBeforeBracket + suf));
+  }
+
+  // 2. intitle: 検索（無制限な本文全文検索の1位誤爆を防止）
+  const intitleQuery = `intitle:"${cleanTitle}"`;
+  try {
+    const searchUrl = `${jaApi}?action=query&list=search&srsearch=${encodeURIComponent(intitleQuery)}&srlimit=6&format=json`;
+    const sRes = UrlFetchApp.fetch(searchUrl, { headers, muteHttpExceptions: true });
+    if (sRes.getResponseCode() === 200) {
+      const sJson = JSON.parse(sRes.getContentText());
+      ((sJson.query && sJson.query.search) || []).forEach(r => pushCandidate('ja', r.title));
+    }
+  } catch (_) {}
+
+  // 3. 原題（英語タイトル）の場合は英語版 Wikipedia も候補源に含める（Muse補足2）
+  if (isEnglishTitle_(cleanTitle)) {
+    pushCandidate('en', cleanTitle);
+    try {
+      const enSearchUrl = `${enApi}?action=query&list=search&srsearch=${encodeURIComponent(`intitle:"${cleanTitle}"`)}&srlimit=4&format=json`;
+      const esRes = UrlFetchApp.fetch(enSearchUrl, { headers, muteHttpExceptions: true });
+      if (esRes.getResponseCode() === 200) {
+        const esJson = JSON.parse(esRes.getContentText());
+        ((esJson.query && esJson.query.search) || []).forEach(r => pushCandidate('en', r.title));
+      }
+    } catch (_) {}
+  }
+
+  const seenResolved = new Set();
+  const scoredResults = [];
+
+  for (const cand of candidates.slice(0, 12)) {
+    const isEn = cand.lang === 'en';
+    const apiBase = isEn ? enApi : jaApi;
+    let p = fetchWikiPageRaw_(apiBase, headers, cand.title, cand.lang, isEn);
+    if (!p) continue;
+
+    // 英語版でヒットし日本語版 langlink がある場合は日本語版を優先取得
+    if (isEn && p.jaLangLink) {
+      const jaPage = fetchWikiPageRaw_(jaApi, headers, p.jaLangLink, 'ja', false);
+      if (jaPage) {
+        jaPage.enSourceTitle = p.title;
+        jaPage.fromRelatedUrl = cand.fromRelatedUrl;
+        p = jaPage;
+      }
+    } else {
+      p.fromRelatedUrl = cand.fromRelatedUrl;
+      if (cand.enSourceTitle) p.enSourceTitle = cand.enSourceTitle;
+    }
+
+    const resolvedKey = `${p.lang}:${p.title}`;
+    if (seenResolved.has(resolvedKey)) continue;
+    seenResolved.add(resolvedKey);
+
+    if (!isValidWorkArticle_(p, cleanTitle, cat, { fromRelatedUrl: p.fromRelatedUrl })) continue;
+
+    const meta = parseWikiPageMetadata_(p, cleanTitle, cat, Object.assign({}, h, { rawTitle }));
+    scoredResults.push(meta);
+  }
+
+  scoredResults.sort((a, b) => b.score - a.score);
+  return scoredResults.slice(0, 5);
+}
+
+function fetchWikipediaInfo_(title, category, hints) {
+  const candidates = searchWikipediaCandidates_(title, category, hints);
+  if (!candidates || candidates.length === 0) return null;
+  const top = candidates[0];
+  if (top.score < 20) return null;
+  return top;
 }
 
 // ============================================================================

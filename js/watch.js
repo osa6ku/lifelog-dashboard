@@ -204,7 +204,10 @@ function renderWatchDetailView(item) {
   detailEl.innerHTML = `
     <div class="detail-topbar">
       <button type="button" class="btn-sm" onclick="closeWatchDetailView()">← 一覧に戻る</button>
-      <button type="button" class="btn-sm primary" onclick="openEditWatchModal(${rowNum}, '${esc(item.id)}')">✏️ 編集</button>
+      <div style="display:flex;gap:6px;align-items:center;">
+        <button type="button" class="btn-sm" onclick="openWikiPreviewModal(${rowNum}, '${esc(item.id)}')">🌐 Wikipedia補完</button>
+        <button type="button" class="btn-sm primary" onclick="openEditWatchModal(${rowNum}, '${esc(item.id)}')">✏️ 編集</button>
+      </div>
     </div>
     <article class="card detail-card" onclick="onDetailContentTap('watch', ${rowNum}, '${esc(item.id)}', event)">
       <div class="card-head">
@@ -714,6 +717,8 @@ function openWatchModal() {
   document.getElementById('watch-modal-title').textContent = '🎬 鑑賞記録を追加';
   document.getElementById('btn-save-watch').textContent = '保存する';
   document.getElementById('btn-delete-watch').style.display = 'none';
+  const wikiPrevBtn = document.getElementById('btn-watch-wiki-preview');
+  if (wikiPrevBtn) wikiPrevBtn.style.display = 'none';
   document.getElementById('w-wiki-label').textContent = '登録時にWikipediaからキャスト・概要を自動補完する';
   document.getElementById('w-wiki').checked = true;
   document.getElementById('w-title').value = '';
@@ -747,6 +752,8 @@ function openEditWatchModal(row, id) {
   document.getElementById('watch-modal-title').textContent = '✏️ 鑑賞記録を編集';
   document.getElementById('btn-save-watch').textContent = '変更を保存する';
   document.getElementById('btn-delete-watch').style.display = 'block';
+  const wikiPrevBtn = document.getElementById('btn-watch-wiki-preview');
+  if (wikiPrevBtn) wikiPrevBtn.style.display = 'block';
   document.getElementById('w-wiki-label').textContent = '保存時にWikipediaからキャスト・概要を再補完する';
   document.getElementById('w-wiki').checked = false;
   document.getElementById('w-title').value = sanitizeDisplayText(item.title || '');
@@ -898,4 +905,192 @@ async function deleteCurrentWatch() {
     showToast(`削除失敗（元に戻しました）: ${err.message || err}`, 'error', null, 5000);
   }
 }
+
+// ============================================================
+// 3-58: Wikipedia候補プレビュー＆選択適用モーダル
+// ============================================================
+let wikiPreviewState = {
+  item: null,
+  candidates: [],
+  cleanedTitle: '',
+  mode: 'fill_empty',
+  loading: false,
+  applying: false,
+};
+
+function setWikiApplyMode(mode) {
+  wikiPreviewState.mode = (mode === 'overwrite_summary_year') ? 'overwrite_summary_year' : 'fill_empty';
+  const fillBtn = document.getElementById('wiki-mode-fill');
+  const overBtn = document.getElementById('wiki-mode-overwrite');
+  if (fillBtn) fillBtn.classList.toggle('active', wikiPreviewState.mode === 'fill_empty');
+  if (overBtn) overBtn.classList.toggle('active', wikiPreviewState.mode === 'overwrite_summary_year');
+}
+
+function closeWikiPreviewModal() {
+  const modal = document.getElementById('modal-wiki-candidates');
+  if (modal) modal.classList.remove('open');
+  wikiPreviewState.loading = false;
+  wikiPreviewState.applying = false;
+}
+
+function openWikiPreviewForEditingWatch() {
+  if (!editingWatch) return;
+  openWikiPreviewModal(editingWatch.row, editingWatch.id);
+}
+
+function renderWikiCandidateCards() {
+  const bodyEl = document.getElementById('wiki-candidates-body');
+  const statusEl = document.getElementById('wiki-candidates-status');
+  if (!bodyEl) return;
+
+  const item = wikiPreviewState.item;
+  const cands = wikiPreviewState.candidates || [];
+
+  if (statusEl) {
+    const qInfo = wikiPreviewState.cleanedTitle ? `検索語: 「${wikiPreviewState.cleanedTitle}」` : '';
+    const modeNote = '感想メモ・ステータス・鑑賞日・評価・既存関連URLは保護されます。';
+    statusEl.textContent = qInfo ? `${qInfo} ／ ${modeNote}` : modeNote;
+  }
+
+  if (!cands.length) {
+    bodyEl.innerHTML = `<div class="wiki-empty">一致する作品候補が見つかりませんでした。<br>タイトル表記を確認するか、関連URL欄へWikipediaのURLを直接貼り付けてから再試行してください。</div>`;
+    return;
+  }
+
+  bodyEl.innerHTML = cands.map((c, idx) => {
+    const badges = (c.matchedHints || []).map(h => `<span class="wiki-hint-badge">${esc(h)}</span>`).join('');
+    const langTag = c.lang === 'en' ? '<span class="wiki-hint-badge">en.wiki</span>' : '';
+    const yearText = c.year ? `<span class="wiki-meta-chip">📅 ${esc(c.year)}年</span>` : '';
+    const platStr = Array.isArray(c.platforms) ? c.platforms.join(', ') : (c.platform || '');
+    const platText = platStr ? `<span class="wiki-meta-chip">📺 ${esc(platStr)}</span>` : '';
+    const warnHtml = c.yearWarning ? `<div class="wiki-year-warn">⚠️ ${esc(c.yearWarning)}</div>` : '';
+    const snippetHtml = c.snippet ? `<div class="wiki-snippet">${esc(c.snippet)}</div>` : '';
+    const linkHtml = c.url
+      ? `<a class="btn-sm" href="${esc(c.url)}" target="_blank" rel="noopener noreferrer" onclick="event.stopPropagation()">🔗 Wikipediaを開く</a>`
+      : '';
+    return `
+      <div class="wiki-cand-card" data-wiki-idx="${idx}">
+        <div class="wiki-cand-head">
+          <div class="wiki-cand-title">${esc(c.title)}</div>
+          <div class="wiki-cand-meta">${yearText}${platText}${langTag}</div>
+        </div>
+        ${badges ? `<div class="wiki-hint-row">${badges}</div>` : ''}
+        ${warnHtml}
+        ${snippetHtml}
+        <div class="wiki-cand-actions">
+          ${linkHtml}
+          <button type="button" class="btn-sm primary" onclick="confirmApplyWikiCandidate(${idx})">この候補を反映</button>
+        </div>
+      </div>`;
+  }).join('');
+  if (item) {
+    const titleEl = document.getElementById('wiki-modal-title');
+    if (titleEl) titleEl.textContent = `🌐 Wikipedia補完: ${item.title}`;
+  }
+}
+
+async function openWikiPreviewModal(row, id) {
+  const item = watchData.find(x => (row && Number(x.row) === Number(row)) || String(x.id) === String(id));
+  if (!item) {
+    showToast('対象の鑑賞記録が見つかりません', 'error', null, 3000);
+    return;
+  }
+
+  wikiPreviewState = {
+    item,
+    candidates: [],
+    cleanedTitle: '',
+    mode: 'fill_empty',
+    loading: true,
+    applying: false,
+  };
+  setWikiApplyMode('fill_empty');
+
+  const titleEl = document.getElementById('wiki-modal-title');
+  const statusEl = document.getElementById('wiki-candidates-status');
+  const bodyEl = document.getElementById('wiki-candidates-body');
+  const modal = document.getElementById('modal-wiki-candidates');
+
+  if (titleEl) titleEl.textContent = `🌐 Wikipedia補完: ${item.title}`;
+  if (statusEl) statusEl.textContent = 'Wikipediaから候補を検索中...（DBはまだ変更されません）';
+  if (bodyEl) bodyEl.innerHTML = '<div class="wiki-empty">🔍 候補を取得しています...</div>';
+  if (modal) modal.classList.add('open');
+
+  try {
+    const res = await searchWatchWikiCandidatesApi({
+      row: item.row,
+      id: item.id,
+      title: item.title,
+      category: item.category,
+      staff: item.staff,
+      cast: item.cast,
+      memo: item.memo,
+      relatedUrl: item.relatedUrl,
+      watchDate: item.watchDate,
+    });
+    if (!res || !res.ok) throw new Error((res && res.error) || '候補検索に失敗しました');
+    wikiPreviewState.candidates = Array.isArray(res.candidates) ? res.candidates : [];
+    wikiPreviewState.cleanedTitle = res.queryTitle || res.cleanedTitle || '';
+    wikiPreviewState.loading = false;
+    renderWikiCandidateCards();
+  } catch (err) {
+    wikiPreviewState.loading = false;
+    if (statusEl) statusEl.textContent = '候補の取得に失敗しました（DBは変更されていません）';
+    if (bodyEl) bodyEl.innerHTML = `<div class="wiki-empty">エラー: ${esc(err.message || String(err))}</div>`;
+  }
+}
+
+async function confirmApplyWikiCandidate(index) {
+  if (wikiPreviewState.applying) return;
+  const item = wikiPreviewState.item;
+  const cand = (wikiPreviewState.candidates || [])[index];
+  if (!item || !cand) return;
+
+  wikiPreviewState.applying = true;
+  showToast(`「${cand.title}」を反映中...`, 'info', null, 0);
+
+  try {
+    const res = await applyWatchWikiCandidateApi({
+      row: item.row,
+      id: item.id,
+      mode: wikiPreviewState.mode,
+      candidate: cand,
+    });
+    if (!res || !res.ok || !res.entry) throw new Error((res && res.error) || 'Wikipedia反映に失敗しました');
+
+    const updated = res.entry;
+    const idx = watchData.findIndex(x => (updated.row && Number(x.row) === Number(updated.row)) || String(x.id) === String(updated.id));
+    if (idx >= 0) watchData[idx] = updated;
+    else watchData.unshift(updated);
+
+    if (editingWatch && ((updated.row && Number(editingWatch.row) === Number(updated.row)) || String(editingWatch.id) === String(updated.id))) {
+      editingWatch = updated;
+      const yearEl = document.getElementById('w-year');
+      const platEl = document.getElementById('w-plat');
+      const sumEl = document.getElementById('w-summary');
+      const urlEl = document.getElementById('w-url');
+      if (yearEl) yearEl.value = updated.releaseYear || '';
+      if (platEl) platEl.value = updated.platform || '';
+      if (sumEl) sumEl.value = sanitizeDisplayText(updated.summary || '');
+      if (urlEl) urlEl.value = updated.relatedUrl || '';
+      watchCastChips = parsePersonTags(updated.cast || '');
+      watchStaffChips = parsePersonTags(updated.staff || '');
+      renderWatchPersonChips('cast');
+      renderWatchPersonChips('staff');
+      watchEditSnapshot = captureWatchModalState();
+    }
+
+    closeWikiPreviewModal();
+    renderWatch();
+    if (activeDetailView && activeDetailView.type === 'watch' &&
+        (Number(activeDetailView.row) === Number(updated.row) || String(activeDetailView.id) === String(updated.id))) {
+      renderWatchDetailView(updated);
+    }
+    showToast(`Wikipedia情報を反映しました（${cand.title}）`, 'success', null, 2800);
+  } catch (err) {
+    wikiPreviewState.applying = false;
+    showToast(`Wikipedia反映失敗: ${err.message || err}`, 'error', null, 5000);
+  }
+}
+
 

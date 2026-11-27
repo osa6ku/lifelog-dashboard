@@ -514,3 +514,152 @@ function batchUpdateWatchMemos(payload) {
   return { ok: true, updatedRows: values.length };
 }
 
+/**
+ * 3-58 対策C Step 1: 鑑賞記録レコードのヒント情報を用いて Wikipedia 候補を検索しプレビュー用に返却する。
+ * DB への書き込みは一切行わない。
+ */
+function searchWatchWikiCandidates(payload) {
+  const p = payload || {};
+  let title = String(p.title || '').trim();
+  let category = String(p.category || '').trim();
+  let staff = String(p.staff || '').trim();
+  let cast = String(p.cast || '').trim();
+  let memo = String(p.memo || '').trim();
+  let relatedUrl = String(p.relatedUrl || '').trim();
+  let watchDate = String(p.watchDate || '').trim();
+  let releaseYear = String(p.releaseYear || '').trim();
+
+  if (p.row || p.id !== undefined) {
+    const res = withSheetRetry_(() => {
+      const sheet = getSheetByNameOrThrow_(WATCH_SS_ID, SHEET_NAME);
+      const row = resolveRowByIdOrIndex_(sheet, COL.ID, p.row, p.id);
+      if (row < 2) return null;
+      return sheet.getRange(row, 1, 1, 15).getValues()[0];
+    }, { label: 'searchWatchWikiCandidates_read' });
+    if (res) {
+      if (!title) title = String(res[COL.TITLE - 1] || '').trim();
+      if (!category) category = String(res[COL.CATEGORY - 1] || '').trim();
+      if (!staff) staff = String(res[COL.STAFF - 1] || '').trim();
+      if (!cast) cast = String(res[COL.CAST - 1] || '').trim();
+      if (!memo) memo = String(res[COL.MEMO - 1] || '').trim();
+      if (!relatedUrl) relatedUrl = String(res[COL.RELATED_URL - 1] || '').trim();
+      if (!watchDate) watchDate = formatDateVal_(res[COL.WATCH_DATE - 1]);
+      if (!releaseYear) releaseYear = String(res[COL.RELEASE_YEAR - 1] || '').trim();
+    }
+  }
+
+  if (!title) {
+    return { ok: false, error: '作品タイトルが空です', candidates: [] };
+  }
+
+  const queryTitle = cleanWorkTitle_(title);
+  const candidates = searchWikipediaCandidates_(title, category, {
+    rawTitle: title,
+    staff,
+    cast,
+    memo,
+    relatedUrl,
+    watchDate,
+    releaseYear,
+  });
+
+  return {
+    ok: true,
+    queryTitle,
+    count: candidates.length,
+    candidates,
+  };
+}
+
+/**
+ * 3-58 対策C Step 2: ユーザーがプレビューから選択確定した Wikipedia 候補を DB へ反映する。
+ * 絶対ルール2厳守: 感想・メモ / ステータス / 鑑賞日 / 評価 / 既存関連URL / Notion元URL は絶対に上書き・消去しない。
+ * Muse補足3準拠: 採用した Wikipedia 記事URLは既存関連URLへ重複排除・改行区切りでマージ保存する。
+ */
+function applyWatchWikiCandidate(payload) {
+  const p = payload || {};
+  const cand = p.candidate || {};
+  const mode = String(p.mode || 'fill_empty').trim();
+  const overwriteSummaryYear = mode === 'overwrite_summary_year';
+
+  const res = withSheetRetry_(() => {
+    const sheet = getSheetByNameOrThrow_(WATCH_SS_ID, SHEET_NAME);
+    const row = resolveRowByIdOrIndex_(sheet, COL.ID, p.row, p.id);
+    if (row < 2) return { notFound: true };
+
+    const cur = sheet.getRange(row, 1, 1, 15).getValues()[0];
+    const rawTitle = String(cur[COL.TITLE - 1] || '').trim();
+    const curMemo = String(cur[COL.MEMO - 1] || '');
+    const curSummary = String(cur[COL.SUMMARY - 1] || '').trim();
+    const curYear = String(cur[COL.RELEASE_YEAR - 1] || '').trim();
+    const watchDate = formatDateVal_(cur[COL.WATCH_DATE - 1]);
+    const watchYear = parseWatchYear_(watchDate);
+
+    // 1. 公開年・放送年（鑑賞年を超える場合は不採用）
+    const candYear = Number(cand.year || 0);
+    const isValidCandYear = candYear >= 1900 && candYear <= 2100 && (!watchYear || candYear <= watchYear);
+    if (isValidCandYear && (overwriteSummaryYear || !curYear)) {
+      sheet.getRange(row, COL.RELEASE_YEAR).setValue(candYear);
+    }
+
+    // 2. プラットフォーム（既存保持＋マージ）
+    const candPlatforms = Array.isArray(cand.platforms)
+      ? cand.platforms
+      : String(cand.platform || '').split(/[,、]/).map(s => s.trim()).filter(Boolean);
+    if (candPlatforms.length > 0) {
+      const curPlat = String(cur[COL.PLATFORM - 1] || '');
+      const merged = [curPlat, ...candPlatforms].filter(Boolean).join(', ');
+      sheet.getRange(row, COL.PLATFORM).setValue(normalizePlatforms_(merged, `${rawTitle} ${curMemo}`));
+    }
+
+    // 3. 出演者（既存保持＋重複排除マージ）
+    const candCast = Array.isArray(cand.cast)
+      ? cand.cast
+      : String(cand.cast || '').split(/[,、]/).map(s => s.trim()).filter(Boolean);
+    if (candCast.length > 0) {
+      const curCast = String(cur[COL.CAST - 1] || '').split(/[,、]/).map(s => s.trim()).filter(Boolean);
+      const mergedCast = curCast.slice();
+      candCast.forEach(c => { if (c && !mergedCast.includes(c)) mergedCast.push(c); });
+      sheet.getRange(row, COL.CAST).setValue(mergedCast.slice(0, MAX_CAST).join(', '));
+    }
+
+    // 4. 監督・スタッフ（既存保持＋重複排除マージ）
+    const candStaff = Array.isArray(cand.staff)
+      ? cand.staff
+      : String(cand.staff || '').split(/[,、]/).map(s => s.trim()).filter(Boolean);
+    if (candStaff.length > 0) {
+      const curStaff = String(cur[COL.STAFF - 1] || '').split(/[,、]/).map(s => s.trim()).filter(Boolean);
+      const mergedStaff = curStaff.slice();
+      candStaff.forEach(s => { if (s && !mergedStaff.includes(s)) mergedStaff.push(s); });
+      sheet.getRange(row, COL.STAFF).setValue(mergedStaff.join(', '));
+    }
+
+    // 5. 作品概要（空欄のみ or 上書き再補完）
+    const candSummary = sanitizeHtmlText_(cand.summary || '');
+    if (candSummary && (overwriteSummaryYear || !curSummary || curSummary.startsWith('⚠️ Wikipedia記事が見つかりませんでした'))) {
+      sheet.getRange(row, COL.SUMMARY).setValue(candSummary);
+    }
+
+    // 6. 採用Wikipedia記事URLを既存関連URLへ重複排除・改行区切りでマージ（Muse補足3）
+    const candUrl = String(cand.url || '').trim();
+    if (candUrl && /^https?:\/\//i.test(candUrl)) {
+      const existingUrls = parseRelatedUrls_(cur[COL.RELATED_URL - 1] || '');
+      if (!existingUrls.includes(candUrl)) {
+        existingUrls.push(candUrl);
+      }
+      sheet.getRange(row, COL.RELATED_URL).setValue(existingUrls.join('\n'));
+    }
+
+    return { notFound: false, sheet, row, appliedUrl: candUrl };
+  }, { label: 'applyWatchWikiCandidate' });
+
+  if (res.notFound) return { ok: false, error: 'Watch entry not found' };
+  const r = withSheetRetry_(() => res.sheet.getRange(res.row, 1, 1, 15).getValues()[0], { label: 'applyWatchWikiCandidate_read' });
+  return {
+    ok: true,
+    mode,
+    appliedUrl: res.appliedUrl,
+    entry: formatWatchRow_(res.row, r),
+  };
+}
+

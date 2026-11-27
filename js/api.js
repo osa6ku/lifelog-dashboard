@@ -65,6 +65,14 @@ async function apiPost(action, payload, timeoutMs) {
   }
 }
 
+async function searchWatchWikiCandidatesApi(payload) {
+  return apiPost('searchWikiCandidates', payload, 35000);
+}
+
+async function applyWatchWikiCandidateApi(payload) {
+  return apiPost('applyWikiCandidate', payload, 25000);
+}
+
 const PENDING_DIARY_KEY = 'lifelog_pending_diary_v1';
 let pendingDiaryDraftInMemory = null;
 

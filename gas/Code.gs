@@ -13,8 +13,16 @@ function doGet(e) {
         return jsonResponse_(searchAllEntries_(params));
       }
       if (api === 'testWiki') {
-        const info = fetchWikipediaInfo_(String(params.title || ''), String(params.category || ''));
-        return jsonResponse_({ ok: true, found: Boolean(info), info });
+        const hints = {
+          staff: String(params.staff || ''),
+          cast: String(params.cast || ''),
+          memo: String(params.memo || ''),
+          relatedUrl: String(params.relatedUrl || ''),
+          watchDate: String(params.watchDate || ''),
+        };
+        const candidates = searchWikipediaCandidates_(String(params.title || ''), String(params.category || ''), hints);
+        const info = candidates.length > 0 ? candidates[0] : null;
+        return jsonResponse_({ ok: true, found: Boolean(info), count: candidates.length, info, candidates });
       }
       if (api === 'presets') {
         const presets = getLocationPresets();
@@ -61,6 +69,8 @@ function doPost(e) {
     if (action === 'updateWatch') return jsonResponse_(updateWatchCard(p));
     if (action === 'updateWatchFull') return jsonResponse_(updateWatchFull(p));
     if (action === 'deleteWatch') return jsonResponse_(deleteWatchEntry(p));
+    if (action === 'searchWikiCandidates') return jsonResponse_(searchWatchWikiCandidates(p));
+    if (action === 'applyWikiCandidate') return jsonResponse_(applyWatchWikiCandidate(p));
     if (action === 'addDiary') return jsonResponse_(addDiaryEntry(p));
     if (action === 'updateDiary') return jsonResponse_(updateDiaryEntry(p));
     if (action === 'syncDiaryDoc') return jsonResponse_(syncDiaryDocAction(p));
