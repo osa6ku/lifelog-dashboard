@@ -506,7 +506,13 @@
       font-size: 11.5px; color: var(--muted); text-align: center;
     }
 
-    /* 3-58: Wikipedia候補プレビュー＆選択UI */
+    /* 3-58 / 3-59: Wikipedia候補プレビュー＆選択UI＋ヒント追記再検索 */
+    .wiki-hint-search-bar {
+      display: flex; gap: 6px; align-items: center; margin-bottom: 8px;
+    }
+    .wiki-hint-search-bar .search-input {
+      flex: 1; min-width: 0; font-size: 13px; padding: 7px 10px;
+    }
     .wiki-mode-bar {
       display: flex; gap: 6px; margin-bottom: 8px;
     }

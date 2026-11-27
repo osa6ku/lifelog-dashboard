@@ -913,6 +913,7 @@ let wikiPreviewState = {
   item: null,
   candidates: [],
   cleanedTitle: '',
+  extraHint: '',
   mode: 'fill_empty',
   loading: false,
   applying: false,
@@ -948,12 +949,13 @@ function renderWikiCandidateCards() {
 
   if (statusEl) {
     const qInfo = wikiPreviewState.cleanedTitle ? `検索語: 「${wikiPreviewState.cleanedTitle}」` : '';
+    const hInfo = wikiPreviewState.extraHint ? `＋ヒント: 「${wikiPreviewState.extraHint}」` : '';
     const modeNote = '感想メモ・ステータス・鑑賞日・評価・既存関連URLは保護されます。';
-    statusEl.textContent = qInfo ? `${qInfo} ／ ${modeNote}` : modeNote;
+    statusEl.textContent = qInfo ? `${qInfo}${hInfo} ／ ${modeNote}` : modeNote;
   }
 
   if (!cands.length) {
-    bodyEl.innerHTML = `<div class="wiki-empty">一致する作品候補が見つかりませんでした。<br>タイトル表記を確認するか、関連URL欄へWikipediaのURLを直接貼り付けてから再試行してください。</div>`;
+    bodyEl.innerHTML = `<div class="wiki-empty">一致する作品候補が見つかりませんでした。<br>上のヒント欄に著者名・監督名・公開年などを入力して「🔍 再検索」するか、関連URL欄へWikipediaのURLを直接貼り付けてお試しください。</div>`;
     return;
   }
 
@@ -989,32 +991,23 @@ function renderWikiCandidateCards() {
   }
 }
 
-async function openWikiPreviewModal(row, id) {
-  const item = watchData.find(x => (row && Number(x.row) === Number(row)) || String(x.id) === String(id));
-  if (!item) {
-    showToast('対象の鑑賞記録が見つかりません', 'error', null, 3000);
-    return;
-  }
+async function fetchWikiCandidatesForModal_(extraHint) {
+  const item = wikiPreviewState.item;
+  if (!item) return;
 
-  wikiPreviewState = {
-    item,
-    candidates: [],
-    cleanedTitle: '',
-    mode: 'fill_empty',
-    loading: true,
-    applying: false,
-  };
-  setWikiApplyMode('fill_empty');
+  const hintStr = String(extraHint || '').trim();
+  wikiPreviewState.extraHint = hintStr;
+  wikiPreviewState.loading = true;
+  wikiPreviewState.candidates = [];
 
-  const titleEl = document.getElementById('wiki-modal-title');
   const statusEl = document.getElementById('wiki-candidates-status');
   const bodyEl = document.getElementById('wiki-candidates-body');
-  const modal = document.getElementById('modal-wiki-candidates');
-
-  if (titleEl) titleEl.textContent = `🌐 Wikipedia補完: ${item.title}`;
-  if (statusEl) statusEl.textContent = 'Wikipediaから候補を検索中...（DBはまだ変更されません）';
+  if (statusEl) {
+    statusEl.textContent = hintStr
+      ? `ヒント「${hintStr}」を加えてWikipediaから再検索中...（DBはまだ変更されません）`
+      : 'Wikipediaから候補を検索中...（DBはまだ変更されません）';
+  }
   if (bodyEl) bodyEl.innerHTML = '<div class="wiki-empty">🔍 候補を取得しています...</div>';
-  if (modal) modal.classList.add('open');
 
   try {
     const res = await searchWatchWikiCandidatesApi({
@@ -1027,6 +1020,7 @@ async function openWikiPreviewModal(row, id) {
       memo: item.memo,
       relatedUrl: item.relatedUrl,
       watchDate: item.watchDate,
+      extraHint: hintStr,
     });
     if (!res || !res.ok) throw new Error((res && res.error) || '候補検索に失敗しました');
     wikiPreviewState.candidates = Array.isArray(res.candidates) ? res.candidates : [];
@@ -1038,6 +1032,42 @@ async function openWikiPreviewModal(row, id) {
     if (statusEl) statusEl.textContent = '候補の取得に失敗しました（DBは変更されていません）';
     if (bodyEl) bodyEl.innerHTML = `<div class="wiki-empty">エラー: ${esc(err.message || String(err))}</div>`;
   }
+}
+
+async function openWikiPreviewModal(row, id) {
+  const item = watchData.find(x => (row && Number(x.row) === Number(row)) || String(x.id) === String(id));
+  if (!item) {
+    showToast('対象の鑑賞記録が見つかりません', 'error', null, 3000);
+    return;
+  }
+
+  wikiPreviewState = {
+    item,
+    candidates: [],
+    cleanedTitle: '',
+    extraHint: '',
+    mode: 'fill_empty',
+    loading: true,
+    applying: false,
+  };
+  setWikiApplyMode('fill_empty');
+
+  const titleEl = document.getElementById('wiki-modal-title');
+  const hintInput = document.getElementById('wiki-extra-hint-input');
+  const modal = document.getElementById('modal-wiki-candidates');
+
+  if (titleEl) titleEl.textContent = `🌐 Wikipedia補完: ${item.title}`;
+  if (hintInput) hintInput.value = '';
+  if (modal) modal.classList.add('open');
+
+  await fetchWikiCandidatesForModal_('');
+}
+
+async function reSearchWikiCandidatesWithHint() {
+  if (!wikiPreviewState.item || wikiPreviewState.applying) return;
+  const hintInput = document.getElementById('wiki-extra-hint-input');
+  const extraHint = hintInput ? String(hintInput.value || '').trim() : '';
+  await fetchWikiCandidatesForModal_(extraHint);
 }
 
 async function confirmApplyWikiCandidate(index) {

@@ -9,7 +9,7 @@
   <link rel="manifest" href="./manifest.json">
   <link rel="apple-touch-icon" href="./apple-touch-icon.png">
   <link rel="icon" type="image/png" href="./icon-192.png">
-  <title>ライフログ・ダッシュボード v1.37.0</title>
+  <title>ライフログ・ダッシュボード v1.38.0</title>
   <link rel="stylesheet" href="./css/style.css">
 </head>
 <body>
@@ -17,7 +17,7 @@
   <div class="header-top">
     <h1 class="app-title">📚 ライフログ・ダッシュボード</h1>
     <div class="header-right">
-      <button type="button" class="ver-badge" id="app-version" onclick="openReleaseNotesModal()" title="変更履歴（リリースノート）を表示">📋 v1.37.0</button>
+      <button type="button" class="ver-badge" id="app-version" onclick="openReleaseNotesModal()" title="変更履歴（リリースノート）を表示">📋 v1.38.0</button>
       <button class="btn-sm" id="btn-check-update" onclick="manualCheckUpdate()" title="最新バージョン確認・更新">🔄 更新</button>
     </div>
   </div>
@@ -220,6 +220,10 @@
     <div class="modal-title">
       <span id="wiki-modal-title">🌐 Wikipedia候補プレビュー</span>
       <button type="button" class="btn-sm" onclick="closeWikiPreviewModal()">✕</button>
+    </div>
+    <div class="wiki-hint-search-bar">
+      <input type="text" id="wiki-extra-hint-input" class="search-input" placeholder="ヒントを追記（例: 東野圭吾 / 2021 / 監督名）" onkeydown="if(isPlainEnterKey(event,this)){event.preventDefault();reSearchWikiCandidatesWithHint();}">
+      <button type="button" class="btn-sm primary" id="btn-wiki-research" onclick="reSearchWikiCandidatesWithHint()">🔍 再検索</button>
     </div>
     <div class="wiki-mode-bar" id="wiki-mode-bar">
       <button type="button" class="wiki-mode-btn active" id="wiki-mode-fill" onclick="setWikiApplyMode('fill_empty')">空欄のみ補完</button>

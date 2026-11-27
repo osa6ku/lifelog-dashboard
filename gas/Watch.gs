@@ -518,6 +518,37 @@ function batchUpdateWatchMemos(payload) {
  * 3-58 対策C Step 1: 鑑賞記録レコードのヒント情報を用いて Wikipedia 候補を検索しプレビュー用に返却する。
  * DB への書き込みは一切行わない。
  */
+/**
+ * 3-59 要件2: 鑑賞記録DBから既登録のスタッフ・出演者名辞書を読取専用で構築する
+ */
+function buildWatchPersonDict_(sheet) {
+  const staffSet = new Set();
+  const castSet = new Set();
+  try {
+    if (!sheet) return { staff: [], cast: [] };
+    const lastRow = sheet.getLastRow();
+    if (lastRow < 2) return { staff: [], cast: [] };
+    const vals = sheet.getRange(2, COL.CAST, lastRow - 1, 2).getValues(); // J:出演者, K:スタッフ
+    for (const r of vals) {
+      const castStr = String(r[0] || '');
+      const staffStr = String(r[1] || '');
+      if (staffStr) {
+        staffStr.split(/[,、\n]+/).forEach(s => {
+          const t = s.trim();
+          if (t && isValidPersonDictToken_(t)) staffSet.add(t);
+        });
+      }
+      if (castStr) {
+        castStr.split(/[,、\n]+/).forEach(s => {
+          const t = s.trim();
+          if (t && isValidPersonDictToken_(t)) castSet.add(t);
+        });
+      }
+    }
+  } catch (_) {}
+  return { staff: Array.from(staffSet), cast: Array.from(castSet) };
+}
+
 function searchWatchWikiCandidates(payload) {
   const p = payload || {};
   let title = String(p.title || '').trim();
@@ -528,10 +559,14 @@ function searchWatchWikiCandidates(payload) {
   let relatedUrl = String(p.relatedUrl || '').trim();
   let watchDate = String(p.watchDate || '').trim();
   let releaseYear = String(p.releaseYear || '').trim();
+  const extraHint = String(p.extraHint || '').trim();
+  let personDict = p.personDict || null;
 
+  let cachedSheet = null;
   if (p.row || p.id !== undefined) {
     const res = withSheetRetry_(() => {
       const sheet = getSheetByNameOrThrow_(WATCH_SS_ID, SHEET_NAME);
+      cachedSheet = sheet;
       const row = resolveRowByIdOrIndex_(sheet, COL.ID, p.row, p.id);
       if (row < 2) return null;
       return sheet.getRange(row, 1, 1, 15).getValues()[0];
@@ -552,6 +587,16 @@ function searchWatchWikiCandidates(payload) {
     return { ok: false, error: '作品タイトルが空です', candidates: [] };
   }
 
+  // メモがあり辞書未指定の場合はDB既登録の人名辞書を読取専用で取得
+  if (memo && !personDict) {
+    try {
+      const sheet = cachedSheet || getSheetByNameOrThrow_(WATCH_SS_ID, SHEET_NAME);
+      personDict = buildWatchPersonDict_(sheet);
+    } catch (_) {
+      personDict = { staff: [], cast: [] };
+    }
+  }
+
   const queryTitle = cleanWorkTitle_(title);
   const candidates = searchWikipediaCandidates_(title, category, {
     rawTitle: title,
@@ -561,11 +606,14 @@ function searchWatchWikiCandidates(payload) {
     relatedUrl,
     watchDate,
     releaseYear,
+    extraHint,
+    personDict,
   });
 
   return {
     ok: true,
     queryTitle,
+    extraHint,
     count: candidates.length,
     candidates,
   };

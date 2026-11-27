@@ -373,3 +373,226 @@ test('3-58 C: Frontend preview modal renders candidates & warnings, cancel makes
   assert.equal(updated.memo, '家族で観た思い出');
   assert.ok(updated.relatedUrl.includes('wikipedia.org'));
 });
+
+test('3-59: Person dictionary hygiene guard excludes general/non-person terms, prioritizes staff & longest match, caps at 2', () => {
+  const { ctx } = loadGasContext();
+
+  assert.equal(ctx.isValidPersonDictToken_('東野圭吾'), true);
+  assert.equal(ctx.isValidPersonDictToken_('宮部みゆき'), true);
+  assert.equal(ctx.isValidPersonDictToken_('ファン'), false);
+  assert.equal(ctx.isValidPersonDictToken_('SNS'), false);
+  assert.equal(ctx.isValidPersonDictToken_('ボイスレコーダー'), false);
+  assert.equal(ctx.isValidPersonDictToken_('AI'), false);
+  assert.equal(ctx.isValidPersonDictToken_('NHK'), false);
+
+  const dict = {
+    staff: ['東野', '東野圭吾', 'ファン', 'SNS', 'ボイスレコーダー', '三谷幸喜', '宮部みゆき'],
+    cast: ['玉森裕太', '神木隆之介', 'ファン'],
+  };
+  const extracted = ctx.extractHintPeopleFromMemo_(
+    'ファンが多くてSNSでも話題。ボイスレコーダーが鍵。東野圭吾と宮部みゆきと三谷幸喜と玉森裕太が好き。',
+    dict,
+    2
+  );
+  assert.equal(extracted.length, 2);
+  // Longest-match-first: 宮部みゆき (5 chars) -> 東野圭吾 (4 chars), 東野 (2 chars) excluded
+  assert.equal(extracted[0], '宮部みゆき');
+  assert.equal(extracted[1], '東野圭吾');
+
+  // When no staff matches, falls back to cast
+  const castFallback = ctx.extractHintPeopleFromMemo_('玉森裕太の演技が良かった。SNSで感想を見た。', dict, 2);
+  assert.deepEqual(Array.from(castFallback), ['玉森裕太']);
+});
+
+test('3-59: ID 126 変身 (staff empty, memo mentions 東野圭吾) hits 変身 (東野圭吾) [1991] via memo person extraction and early-exits', () => {
+  const fetchedUrls = [];
+  const routes = [
+    {
+      match: (u) => u.includes('titles=' + encodeURIComponent('変身 (東野圭吾)')),
+      response: () => ({
+        query: {
+          pages: {
+            '501': {
+              pageid: 501,
+              title: '変身 (東野圭吾)',
+              extract: '『変身』（へんしん）は、東野圭吾の小説。1991年に講談社から単行本が刊行された。1993年に講談社ノベルス版が刊行。',
+              categories: [{ title: 'Category:東野圭吾の小説' }],
+            },
+          },
+        },
+      }),
+    },
+    {
+      match: (u) => u.includes('titles=' + encodeURIComponent('変身')),
+      response: () => ({
+        query: {
+          pages: {
+            '502': {
+              pageid: 502,
+              title: '変身',
+              extract: '変身とは、姿を変えることを指す一般用語。特撮ヒーロー番組などで用いられる。',
+              categories: [{ title: 'Category:フィクションの要素' }],
+            },
+          },
+        },
+      }),
+    },
+  ];
+
+  const { ctx } = loadGasContext({
+    extraGlobals: {
+      UrlFetchApp: {
+        fetch(url) {
+          fetchedUrls.push(url);
+          return makeMockWikiFetcher(routes).fetch(url);
+        },
+      },
+    },
+  });
+
+  const cands = ctx.searchWikipediaCandidates_('変身', '本', {
+    staff: '',
+    cast: '',
+    memo: '東野圭吾93年の作品を文庫本で。',
+    personDict: { staff: ['東野圭吾', 'ファン', 'SNS'], cast: [] },
+  });
+
+  assert.equal(cands.length, 1);
+  assert.equal(cands[0].title, '変身 (東野圭吾)');
+  assert.equal(String(cands[0].year), '1991');
+  assert.ok(cands[0].matchedHints.some(h => h.includes('東野圭吾')));
+  // Early exit: should NOT trigger supplementary list=search or prop=links disambiguation expansion
+  assert.equal(fetchedUrls.some(u => u.includes('list=search')), false);
+  assert.equal(fetchedUrls.some(u => u.includes('prop=links')), false);
+});
+
+test('3-59: Disambiguation page link expansion collects タイトル (〇〇) candidates and respects API call cap', () => {
+  const fetchedUrls = [];
+  const routes = [
+    {
+      match: (u) => u.includes('prop=links') && u.includes('titles=' + encodeURIComponent('手紙')),
+      response: () => ({
+        query: {
+          pages: {
+            '600': {
+              pageid: 600,
+              title: '手紙',
+              links: [
+                { title: '手紙 (東野圭吾)' },
+                { title: '手紙 (2006年の映画)' },
+                { title: '手紙 (曖昧さ回避)' },
+                { title: '無関係な記事' },
+              ],
+            },
+          },
+        },
+      }),
+    },
+    {
+      match: (u) => u.includes('titles=' + encodeURIComponent('手紙') + '&') && !u.includes('prop=links'),
+      response: () => ({
+        query: {
+          pages: {
+            '600': {
+              pageid: 600,
+              title: '手紙',
+              extract: '手紙は曖昧さ回避ページです。',
+              pageprops: { disambiguation: '' },
+              categories: [{ title: 'Category:曖昧さ回避' }],
+            },
+          },
+        },
+      }),
+    },
+    {
+      match: (u) => u.includes('titles=' + encodeURIComponent('手紙 (東野圭吾)')),
+      response: () => ({
+        query: {
+          pages: {
+            '601': {
+              pageid: 601,
+              title: '手紙 (東野圭吾)',
+              extract: '『手紙』は、東野圭吾の小説。2003年に刊行された。',
+              categories: [{ title: 'Category:東野圭吾の小説' }],
+            },
+          },
+        },
+      }),
+    },
+  ];
+
+  const { ctx } = loadGasContext({
+    extraGlobals: {
+      UrlFetchApp: {
+        fetch(url) {
+          fetchedUrls.push(url);
+          return makeMockWikiFetcher(routes).fetch(url);
+        },
+      },
+    },
+  });
+
+  const cands = ctx.searchWikipediaCandidates_('手紙', '本', {
+    memo: '兄が服役する兄弟の物語。',
+    maxExtraApiCalls: 3,
+  });
+
+  assert.ok(cands.some(c => c.title === '手紙 (東野圭吾)'));
+  assert.equal(String(cands[0].year), '2003');
+  const extraSearchCalls = fetchedUrls.filter(u => u.includes('list=search') || u.includes('prop=links')).length;
+  assert.ok(extraSearchCalls <= 3, `Expected <= 3 extra calls, got ${extraSearchCalls}`);
+});
+
+test('3-59: Frontend preview modal supports extraHint re-search from 0-result state without closing modal', async () => {
+  const apiCalls = [];
+  const { ctx } = loadFrontendContext();
+  ctx.apiPost = async (action, payload) => {
+    apiCalls.push({ action, payload });
+    if (action === 'searchWikiCandidates') {
+      if (!payload.extraHint) {
+        return { ok: true, queryTitle: '変身', extraHint: '', candidates: [] };
+      }
+      return {
+        ok: true,
+        queryTitle: '変身',
+        extraHint: payload.extraHint,
+        candidates: [
+          {
+            title: '変身 (東野圭吾)',
+            url: 'https://ja.wikipedia.org/wiki/%E5%A4%89%E8%BA%AB_(%E6%9D%B1%E9%87%8E%E5%9C%AD%E5%90%BE)',
+            year: '1991',
+            yearWarning: '',
+            snippet: '東野圭吾の小説。1991年刊行。',
+            matchedHints: ['タイトル完全一致', 'ヒント一致: 東野圭吾'],
+            lang: 'ja',
+          },
+        ],
+      };
+    }
+    return { ok: true };
+  };
+
+  vm.runInContext(`
+    statusFilter = 'ALL';
+    watchData = [{
+      row: 12, id: '126', title: '変身', category: '本', watchDate: '2020-01-01',
+      status: '完了', rating: '4', platform: '', releaseYear: '',
+      cast: '', staff: '', summary: '誤文', memo: '文庫本で読んだ。',
+      relatedUrl: '', notionUrl: ''
+    }];
+  `, ctx);
+
+  // Initial open returns 0 candidates -> modal stays open with empty guidance
+  await ctx.openWikiPreviewModal(12, '126');
+  assert.equal(ctx.document.getElementById('modal-wiki-candidates').classList.contains('open'), true);
+  assert.ok(ctx.document.getElementById('wiki-candidates-body').innerHTML.includes('再検索'));
+
+  // Enter extraHint and re-search without closing modal
+  ctx.document.getElementById('wiki-extra-hint-input').value = '東野圭吾';
+  await ctx.reSearchWikiCandidatesWithHint();
+  assert.equal(apiCalls.length, 2);
+  assert.equal(apiCalls[1].payload.extraHint, '東野圭吾');
+  assert.equal(ctx.document.getElementById('modal-wiki-candidates').classList.contains('open'), true);
+  assert.ok(ctx.document.getElementById('wiki-candidates-body').innerHTML.includes('変身 (東野圭吾)'));
+});
+

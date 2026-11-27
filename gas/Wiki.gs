@@ -606,8 +606,8 @@ function extractReleaseYear_(page, category, hints) {
     return { year: '', rawExtractedYear: '', yearWarning: '' };
   }
 
-  // 3. レコードのタイトル・メモに明示的な年がある場合は優先マッチ
-  const hintText = `${h.rawTitle || ''} ${h.memo || ''}`;
+  // 3. レコードのタイトル・メモ・追加ヒントに明示的な年がある場合は優先マッチ
+  const hintText = `${h.rawTitle || ''} ${h.memo || ''} ${h.extraHint || ''}`;
   const explicitYears = [];
   const expRe = /\b((?:19|20)\d{2})\b/g;
   let exm;
@@ -671,6 +671,131 @@ function extractMemoHintKeywords_(memo) {
   return tokens;
 }
 
+const WIKI_NON_PERSON_STOPWORDS_ = new Set([
+  'ファン', 'sns', 'ボイスレコーダー', 'ドラマ', '映画', 'アニメ', '小説', '漫画', 'マンガ', '本', '書籍', '文庫',
+  '原作', '監督', '脚本', '演出', '主演', '出演', '出演者', '音楽', '制作', '製作', '配給', '配信', '放送', '劇場',
+  '映画館', 'テレビ', 'ラジオ', 'ビデオ', 'ムービー', 'シリーズ', 'シーズン', 'チーム', 'スタッフ', 'キャスト',
+  'その他', '不明', '公式', '動画', '写真', '感想', 'メモ', '作品', '主人公', '登場人物', '物語', 'ストーリー',
+  'netflix', 'amazon', 'prime', 'hulu', 'disney', 'nhk', 'tbs', 'wowow', 'u-next', 'youtube', 'abema', 'tver',
+  'フジテレビ', '日本テレビ', 'テレビ朝日', 'テレビ東京', 'アマプラ', 'ネットフリックス',
+]);
+
+/**
+ * 3-59 辞書衛生ガード（Muse補足1）:
+ * 一般語・非人名・短すぎる英字のみトークンを辞書から除外する
+ */
+function isValidPersonDictToken_(raw) {
+  const s = String(raw || '').trim();
+  if (!s || s.length < 2 || s.length > 20) return false;
+  if (WIKI_NON_PERSON_STOPWORDS_.has(s.toLowerCase())) return false;
+  // 数字・記号のみ、URL断片、4文字以下の英数字のみ（SNS/NHK/AI等）は除外
+  if (/^[\d\s\-_./:：・、,()（）]+$/.test(s)) return false;
+  if (/https?:\/\//i.test(s)) return false;
+  if (/^[A-Za-z0-9._\-]{1,4}$/.test(s)) return false;
+  // 一般的な機材・メディア・属性カタカナ語を除外
+  if (/(?:レコーダー|カメラ|スマホ|アプリ|サイト|ブログ|チャンネル|テレビ|ラジオ|ビデオ|ムービー|サービス|システム)$/.test(s)) {
+    return false;
+  }
+  return true;
+}
+
+/**
+ * 3-59 要件2＋Muse補足1:
+ * 感想・メモ本文からDB既登録の人名ヒントを最大2名抽出する。
+ * - スタッフ（原作・監督・脚本）由来を優先し、出演者由来は補助
+ * - 最長一致優先、部分一致の重複を防止
+ */
+function extractHintPeopleFromMemo_(memo, personDict, maxCount) {
+  const text = String(memo || '').replace(/https?:\/\/\S+/g, ' ').trim();
+  if (!text || !personDict) return [];
+  const limit = maxCount || 2;
+  const textNoSpace = text.replace(/[\s　]+/g, '');
+
+  const prepare = (arr) => {
+    const uniq = [];
+    const seen = new Set();
+    for (const item of (Array.isArray(arr) ? arr : [])) {
+      const tok = String(item || '').trim();
+      if (!isValidPersonDictToken_(tok)) continue;
+      const key = tok.replace(/[\s　]+/g, '').toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      uniq.push(tok);
+    }
+    // 最長一致優先
+    uniq.sort((a, b) => b.length - a.length);
+    return uniq;
+  };
+
+  const staffList = prepare(personDict.staff);
+  const castList = prepare(personDict.cast);
+  const matched = [];
+  const matchedNorms = [];
+
+  const scan = (list) => {
+    for (const name of list) {
+      if (matched.length >= limit) break;
+      const norm = name.replace(/[\s　]+/g, '');
+      if (!norm) continue;
+      // 既に採用したより長い名前の部分文字列ならスキップ
+      if (matchedNorms.some(m => m.includes(norm))) continue;
+      const isAscii = /^[A-Za-z\s.'\-]+$/.test(name);
+      let hit = false;
+      if (isAscii) {
+        const re = new RegExp(`\\b${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
+        hit = re.test(text);
+      } else {
+        hit = text.includes(name) || (norm.length >= 3 && textNoSpace.includes(norm));
+      }
+      if (hit) {
+        matched.push(name);
+        matchedNorms.push(norm);
+      }
+    }
+  };
+
+  // スタッフ優先 → 出演者補助
+  scan(staffList);
+  if (matched.length < limit) scan(castList);
+  return matched;
+}
+
+/**
+ * 3-59 要件1:
+ * 曖昧さ回避ページから「タイトル (〇〇)」形式の作品記事リンクを上限付き（最大15件）で収集する
+ */
+function fetchDisambiguationLinks_(apiBase, headers, pageTitle, cleanTitle, limit) {
+  const maxLinks = limit || 15;
+  const url = `${apiBase}?action=query&redirects=1&prop=links&plnamespace=0&pllimit=100&titles=${encodeURIComponent(pageTitle)}&format=json`;
+  try {
+    const res = UrlFetchApp.fetch(url, { headers, muteHttpExceptions: true });
+    if (res.getResponseCode() !== 200) return [];
+    const json = JSON.parse(res.getContentText());
+    const pages = (json.query && json.query.pages) || {};
+    const page = Object.values(pages)[0];
+    if (!page || page.missing !== undefined || !Array.isArray(page.links)) return [];
+
+    const nClean = normalizeWikiTitleForCompare_(cleanTitle);
+    const out = [];
+    const seen = new Set();
+    for (const lk of page.links) {
+      const t = String((lk && lk.title) || '').trim();
+      if (!t || seen.has(t) || /曖昧さ回避|disambiguation/i.test(t)) continue;
+      const hasParen = /[（(][^）)]+[）)]$/.test(t);
+      const startsWithTitle = t.startsWith(cleanTitle + ' (') || t.startsWith(cleanTitle + '（');
+      const nLink = normalizeWikiTitleForCompare_(t);
+      if (startsWithTitle || (hasParen && nLink && nClean && nLink === nClean)) {
+        seen.add(t);
+        out.push(t);
+        if (out.length >= maxLinks) break;
+      }
+    }
+    return out;
+  } catch (_) {
+    return [];
+  }
+}
+
 function scoreWikiCandidate_(page, cleanTitle, category, hints, yearInfo) {
   const h = hints || {};
   let score = 0;
@@ -711,6 +836,17 @@ function scoreWikiCandidate_(page, cleanTitle, category, hints, yearInfo) {
   const haystack = `${page.title}\n${page.extract || ''}\n${page.wikitext || ''}\n${(page.categories || []).join(' ')}`;
   const hayNoSpace = haystack.replace(/[\s　]+/g, '').toLowerCase();
 
+  // 追加ヒント（モーダル内ヒント追記・再検索：3-59 要件3）
+  const extraHintTokens = String(h.extraHint || '').split(/[\s　,、]+/).map(s => s.trim()).filter(s => s.length >= 2);
+  let extraHits = 0;
+  for (const eh of extraHintTokens) {
+    if (hayNoSpace.includes(eh.replace(/[\s　]+/g, '').toLowerCase())) {
+      score += 30;
+      extraHits++;
+      if (extraHits <= 2) matchedHints.push(`ヒント一致: ${eh}`);
+    }
+  }
+
   // 監督・スタッフヒント
   const staffTokens = String(h.staff || '').split(/[,、\n]+/).map(s => s.trim()).filter(s => s.length >= 2);
   let staffHits = 0;
@@ -719,6 +855,18 @@ function scoreWikiCandidate_(page, cleanTitle, category, hints, yearInfo) {
       score += 25;
       staffHits++;
       if (staffHits <= 2) matchedHints.push(`スタッフ一致: ${st}`);
+    }
+  }
+
+  // メモ本文から自動抽出した既登録人名ヒント（3-59 要件2）
+  const extractedPeople = Array.isArray(h.extractedPeople) ? h.extractedPeople : [];
+  let epHits = 0;
+  for (const ep of extractedPeople) {
+    if (staffTokens.includes(ep)) continue;
+    if (hayNoSpace.includes(ep.replace(/[\s　]+/g, '').toLowerCase())) {
+      score += 25;
+      epHits++;
+      if (epHits <= 2) matchedHints.push(`メモ人名一致: ${ep}`);
     }
   }
 
@@ -825,7 +973,10 @@ function parseWikiPageMetadata_(page, cleanTitle, category, hints) {
 }
 
 /**
- * 3-58 対策A＋B＋Muse補足1・2: Wikipedia 上位候補（最大5件）をスコアリング・ランク付けして返す
+ * 3-58 / 3-59: Wikipedia 上位候補（最大5件）をスコアリング・ランク付けして返す
+ * - Phase 1: 関連URL・extraHint・人名ヒント（既存スタッフ/出演者＋メモ内既登録人名）・区分サフィックスの直接取得
+ * - 早期終了: Phase 1 で高スコア候補（>= 65 かつ年ズレ警告なし）が得られた場合は追加検索・曖昧さ回避展開を打ち切り
+ * - Phase 2: 追加APIコール上限（MAX_EXTRA_API_CALLS=6）内で補助 intitle: 検索・英語Wikipedia・曖昧さ回避ページ展開を実施
  */
 function searchWikipediaCandidates_(title, category, hints) {
   const jaApi = 'https://ja.wikipedia.org/w/api.php';
@@ -837,6 +988,9 @@ function searchWikipediaCandidates_(title, category, hints) {
   const cat = String(category || '').trim();
   if (!cleanTitle) return [];
 
+  const MAX_EXTRA_API_CALLS = Number(h.maxExtraApiCalls) > 0 ? Number(h.maxExtraApiCalls) : 6;
+  const HIGH_CONFIDENCE_SCORE = 65;
+
   const suffixMap = {
     'ドラマ': [' (テレビドラマ)', ' (ドラマ)'],
     '映画': [' (映画)'],
@@ -844,68 +998,81 @@ function searchWikipediaCandidates_(title, category, hints) {
     '本': [' (小説)', ' (書籍)', ' (漫画)'],
   };
 
-  const candidates = []; // { lang, title, fromRelatedUrl, enSourceTitle }
+  // メモ本文からDB既登録人名ヒントを自動抽出（最大2名・スタッフ優先・辞書衛生ガード付）
+  const extractedPeople = extractHintPeopleFromMemo_(h.memo || '', h.personDict || null, 2);
+  const extraHintTokens = String(h.extraHint || '').split(/[\s　,、]+/).map(s => s.trim()).filter(s => s.length >= 2);
+  const staffList = String(h.staff || '').split(/[,、\n]+/).map(s => s.trim()).filter(Boolean);
+  const castList = String(h.cast || '').split(/[,、\n]+/).map(s => s.trim()).filter(Boolean);
+
+  // 候補収集に使うヒント人名（最大2名: 既存スタッフ優先 → メモ抽出人名 → 既存出演者補助）
+  const queryPeople = [];
+  const addQueryPerson = (p) => {
+    if (!p || queryPeople.includes(p) || queryPeople.length >= 2) return;
+    queryPeople.push(p);
+  };
+  staffList.forEach(addQueryPerson);
+  extractedPeople.forEach(addQueryPerson);
+  if (queryPeople.length < 2) castList.forEach(addQueryPerson);
+
+  const enrichedHints = Object.assign({}, h, { rawTitle, extractedPeople });
+
+  const directQueue = [];
   const seenQuery = new Set();
-  const pushCandidate = (lang, t, extra) => {
+  const pushTo = (queue, lang, t, extra) => {
     const s = String(t || '').trim();
     if (!s) return;
     const key = `${lang}:${s}`;
     if (seenQuery.has(key)) return;
     seenQuery.add(key);
-    candidates.push(Object.assign({ lang, title: s, fromRelatedUrl: false, enSourceTitle: '' }, extra || {}));
+    queue.push(Object.assign({ lang, title: s, fromRelatedUrl: false, enSourceTitle: '' }, extra || {}));
   };
 
   // 0. 関連URLに wikipedia.org/wiki/... がある場合は最優先候補として直接追加（対策B）
   const wikiUrls = extractWikipediaUrlsFromRelated_(h.relatedUrl || '');
-  wikiUrls.forEach(wu => pushCandidate(wu.lang, wu.title, { fromRelatedUrl: true }));
+  wikiUrls.forEach(wu => pushTo(directQueue, wu.lang, wu.title, { fromRelatedUrl: true }));
 
-  // 1. 完全一致 → 区分サフィックス一致 → 著者/監督サフィックス一致（対策A）
-  pushCandidate('ja', cleanTitle);
-  (suffixMap[cat] || []).forEach(suf => pushCandidate('ja', cleanTitle + suf));
-  const firstStaff = String(h.staff || '').split(/[,、\n]+/).map(s => s.trim()).filter(Boolean)[0] || '';
-  if (firstStaff) {
-    pushCandidate('ja', `${cleanTitle} (${firstStaff})`);
-    pushCandidate('ja', `${cleanTitle} (${firstStaff}の小説)`);
+  // 1a. extraHint 付き直接候補（3-59 要件3）
+  for (const eh of extraHintTokens.slice(0, 2)) {
+    if (/^(?:19|20)\d{2}$/.test(eh)) continue;
+    pushTo(directQueue, 'ja', `${cleanTitle} (${eh})`);
+    if (cat === '本') pushTo(directQueue, 'ja', `${cleanTitle} (${eh}の小説)`);
   }
+
+  // 1b. 人名ヒント付き直接候補（3-59 要件2: 既存スタッフ/メモ抽出人名/出演者、最大2名）
+  for (const person of queryPeople) {
+    pushTo(directQueue, 'ja', `${cleanTitle} (${person})`);
+    if (cat === '本') pushTo(directQueue, 'ja', `${cleanTitle} (${person}の小説)`);
+  }
+
+  // 1c. 完全一致 → 区分サフィックス一致（対策A）
+  pushTo(directQueue, 'ja', cleanTitle);
+  (suffixMap[cat] || []).forEach(suf => pushTo(directQueue, 'ja', cleanTitle + suf));
+
   // 括弧副題付き（例: 万事快調〈オール・グリーンズ〉）のコアタイトルも候補化
   const coreBeforeBracket = cleanTitle.replace(/[〈《（(][^〉》）)]+[〉》）)]/g, '').trim();
   if (coreBeforeBracket && coreBeforeBracket !== cleanTitle && coreBeforeBracket.length >= 2) {
-    pushCandidate('ja', coreBeforeBracket);
-    (suffixMap[cat] || []).forEach(suf => pushCandidate('ja', coreBeforeBracket + suf));
+    pushTo(directQueue, 'ja', coreBeforeBracket);
+    (suffixMap[cat] || []).forEach(suf => pushTo(directQueue, 'ja', coreBeforeBracket + suf));
   }
 
-  // 2. intitle: 検索（無制限な本文全文検索の1位誤爆を防止）
-  const intitleQuery = `intitle:"${cleanTitle}"`;
-  try {
-    const searchUrl = `${jaApi}?action=query&list=search&srsearch=${encodeURIComponent(intitleQuery)}&srlimit=6&format=json`;
-    const sRes = UrlFetchApp.fetch(searchUrl, { headers, muteHttpExceptions: true });
-    if (sRes.getResponseCode() === 200) {
-      const sJson = JSON.parse(sRes.getContentText());
-      ((sJson.query && sJson.query.search) || []).forEach(r => pushCandidate('ja', r.title));
-    }
-  } catch (_) {}
-
-  // 3. 原題（英語タイトル）の場合は英語版 Wikipedia も候補源に含める（Muse補足2）
+  // 英語タイトルの場合は直接取得も Phase 1 へ含める
   if (isEnglishTitle_(cleanTitle)) {
-    pushCandidate('en', cleanTitle);
-    try {
-      const enSearchUrl = `${enApi}?action=query&list=search&srsearch=${encodeURIComponent(`intitle:"${cleanTitle}"`)}&srlimit=4&format=json`;
-      const esRes = UrlFetchApp.fetch(enSearchUrl, { headers, muteHttpExceptions: true });
-      if (esRes.getResponseCode() === 200) {
-        const esJson = JSON.parse(esRes.getContentText());
-        ((esJson.query && esJson.query.search) || []).forEach(r => pushCandidate('en', r.title));
-      }
-    } catch (_) {}
+    pushTo(directQueue, 'en', cleanTitle);
   }
 
   const seenResolved = new Set();
   const scoredResults = [];
+  let disambigPageTitle = '';
 
-  for (const cand of candidates.slice(0, 12)) {
+  const evaluateCandidate = (cand) => {
     const isEn = cand.lang === 'en';
     const apiBase = isEn ? enApi : jaApi;
     let p = fetchWikiPageRaw_(apiBase, headers, cand.title, cand.lang, isEn);
-    if (!p) continue;
+    if (!p) return null;
+
+    if (!isEn && p.isDisambig && !disambigPageTitle) {
+      disambigPageTitle = p.title;
+    }
 
     // 英語版でヒットし日本語版 langlink がある場合は日本語版を優先取得
     if (isEn && p.jaLangLink) {
@@ -921,13 +1088,79 @@ function searchWikipediaCandidates_(title, category, hints) {
     }
 
     const resolvedKey = `${p.lang}:${p.title}`;
-    if (seenResolved.has(resolvedKey)) continue;
+    if (seenResolved.has(resolvedKey)) return null;
     seenResolved.add(resolvedKey);
 
-    if (!isValidWorkArticle_(p, cleanTitle, cat, { fromRelatedUrl: p.fromRelatedUrl })) continue;
+    if (!isValidWorkArticle_(p, cleanTitle, cat, { fromRelatedUrl: p.fromRelatedUrl })) return null;
 
-    const meta = parseWikiPageMetadata_(p, cleanTitle, cat, Object.assign({}, h, { rawTitle }));
+    const meta = parseWikiPageMetadata_(p, cleanTitle, cat, enrichedHints);
     scoredResults.push(meta);
+    return meta;
+  };
+
+  // Phase 1: 直接取得を評価し、高確信度ヒットがあれば早期終了（Muse補足2）
+  let earlyExited = false;
+  for (const cand of directQueue.slice(0, 10)) {
+    const meta = evaluateCandidate(cand);
+    if (meta && meta.score >= HIGH_CONFIDENCE_SCORE && !meta.yearWarning) {
+      earlyExited = true;
+      break;
+    }
+  }
+
+  // Phase 2: 早期終了しなかった場合のみ追加検索・曖昧さ回避展開を上限内で実行
+  if (!earlyExited) {
+    let extraApiCalls = 0;
+    const extraQueue = [];
+
+    const runIntitleSearch = (apiBase, lang, queryStr, srlimit) => {
+      if (extraApiCalls >= MAX_EXTRA_API_CALLS) return;
+      extraApiCalls++;
+      try {
+        const searchUrl = `${apiBase}?action=query&list=search&srsearch=${encodeURIComponent(queryStr)}&srlimit=${srlimit}&format=json`;
+        const sRes = UrlFetchApp.fetch(searchUrl, { headers, muteHttpExceptions: true });
+        if (sRes.getResponseCode() === 200) {
+          const sJson = JSON.parse(sRes.getContentText());
+          ((sJson.query && sJson.query.search) || []).forEach(r => pushTo(extraQueue, lang, r.title));
+        }
+      } catch (_) {}
+    };
+
+    // 2a. extraHint 付き intitle: 補助検索
+    if (extraHintTokens.length > 0 && extraApiCalls < MAX_EXTRA_API_CALLS) {
+      runIntitleSearch(jaApi, 'ja', `intitle:"${cleanTitle}" ${extraHintTokens.slice(0, 2).join(' ')}`, 5);
+    }
+
+    // 2b. 人名ヒント付き intitle: 補助検索（最大1回）
+    if (queryPeople.length > 0 && extraApiCalls < MAX_EXTRA_API_CALLS) {
+      runIntitleSearch(jaApi, 'ja', `intitle:"${cleanTitle}" ${queryPeople[0]}`, 5);
+    }
+
+    // 2c. 通常の intitle: 検索
+    if (extraApiCalls < MAX_EXTRA_API_CALLS) {
+      runIntitleSearch(jaApi, 'ja', `intitle:"${cleanTitle}"`, 6);
+    }
+
+    // 2d. 英語タイトルの場合は英語版 intitle: 検索
+    if (isEnglishTitle_(cleanTitle) && extraApiCalls < MAX_EXTRA_API_CALLS) {
+      runIntitleSearch(enApi, 'en', `intitle:"${cleanTitle}"`, 4);
+    }
+
+    // 2e. 曖昧さ回避ページ展開（3-59 要件1: 最大15件リンク収集、追加コール上限内）
+    if (extraApiCalls < MAX_EXTRA_API_CALLS) {
+      const disambigTarget = disambigPageTitle || `${cleanTitle} (曖昧さ回避)`;
+      extraApiCalls++;
+      const disambigLinks = fetchDisambiguationLinks_(jaApi, headers, disambigTarget, cleanTitle, 15);
+      disambigLinks.forEach(lt => pushTo(extraQueue, 'ja', lt));
+    }
+
+    // extraQueue を評価（追加フェッチも全体上限に収まるよう最大15件まで、高スコア到達で早期終了）
+    for (const cand of extraQueue.slice(0, 15)) {
+      const meta = evaluateCandidate(cand);
+      if (meta && meta.score >= HIGH_CONFIDENCE_SCORE && !meta.yearWarning && scoredResults.length >= 2) {
+        break;
+      }
+    }
   }
 
   scoredResults.sort((a, b) => b.score - a.score);

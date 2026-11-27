@@ -13,12 +13,24 @@ function doGet(e) {
         return jsonResponse_(searchAllEntries_(params));
       }
       if (api === 'testWiki') {
+        const memoStr = String(params.memo || '');
+        let personDict = null;
+        if (memoStr && String(params.useDbDict || '1') !== '0') {
+          try {
+            const sheet = getSheetByNameOrThrow_(WATCH_SS_ID, SHEET_NAME);
+            personDict = buildWatchPersonDict_(sheet);
+          } catch (_) {
+            personDict = null;
+          }
+        }
         const hints = {
           staff: String(params.staff || ''),
           cast: String(params.cast || ''),
-          memo: String(params.memo || ''),
+          memo: memoStr,
           relatedUrl: String(params.relatedUrl || ''),
           watchDate: String(params.watchDate || ''),
+          extraHint: String(params.extraHint || ''),
+          personDict,
         };
         const candidates = searchWikipediaCandidates_(String(params.title || ''), String(params.category || ''), hints);
         const info = candidates.length > 0 ? candidates[0] : null;
